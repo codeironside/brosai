@@ -1,0 +1,25 @@
+{
+  "name": "brosai",
+  "version": "1.0.0",
+  "description": "",
+  "keywords": [
+    "ai",
+    "agent",
+    "assitant"
+  ],
+  "homepage": "https://github.com/codeironside/brosai#readme",
+  "bugs": {
+    "url": "https://github.com/codeironside/brosai/issues"
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/codeironside/brosai.git"
+  },
+  "license": "MIT",
+  "author": "oluwatobi",
+  "type": "commonjs",
+  "main": "index.ts",
+  "scripts": {
+    "test": "npm run dev"
+  }
+}
