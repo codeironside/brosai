@@ -29,6 +29,16 @@ function proof(token: string, secret: string) {
   return createHmac('sha256', secret).update(token).digest('hex');
 }
 
+type GraphJson = {
+  id?: string;
+  error?: { message?: string };
+};
+
+async function readGraphJson(res: Response): Promise<GraphJson> {
+  const parsed = await res.json().catch(() => ({}));
+  return parsed && typeof parsed === 'object' ? (parsed as GraphJson) : {};
+}
+
 async function postJson(url: string, body: any, headers: Record<string, string>) {
   const res = await fetch(url, {
     method: 'POST',
@@ -70,7 +80,7 @@ async function publishFacebook(account: any, text: string) {
     `https://graph.facebook.com/v21.0/${encodeURIComponent(account.accountId)}/feed?${params.toString()}`,
     { method: 'POST', headers: { Accept: 'application/json', 'User-Agent': 'vamvamvam-ai/1.0' } }
   );
-  const json = await res.json().catch(() => ({}));
+  const json = await readGraphJson(res);
   if (!res.ok) throw new Error(json.error?.message || 'Facebook publish failed');
   return json.id ? `Facebook post ${json.id}` : 'Posted to Facebook';
 }
@@ -129,7 +139,7 @@ async function publishThreads(account: any, text: string) {
     `https://graph.threads.net/v1.0/${encodeURIComponent(account.accountId)}/threads?${createParams.toString()}`,
     { method: 'POST', headers: { Accept: 'application/json' } }
   );
-  const createdJson = await created.json().catch(() => ({}));
+  const createdJson = await readGraphJson(created);
   if (!created.ok || !createdJson.id) throw new Error(createdJson.error?.message || 'Threads draft failed');
   const publishParams = new URLSearchParams({
     creation_id: String(createdJson.id),
@@ -140,7 +150,7 @@ async function publishThreads(account: any, text: string) {
     `https://graph.threads.net/v1.0/${encodeURIComponent(account.accountId)}/threads_publish?${publishParams.toString()}`,
     { method: 'POST', headers: { Accept: 'application/json' } }
   );
-  const publishedJson = await published.json().catch(() => ({}));
+  const publishedJson = await readGraphJson(published);
   if (!published.ok) throw new Error(publishedJson.error?.message || 'Threads publish failed');
   return publishedJson.id ? `Threads post ${publishedJson.id}` : 'Posted to Threads';
 }
