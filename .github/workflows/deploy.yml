@@ -2,9 +2,9 @@ name: CI and production deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 concurrency:
@@ -24,21 +24,19 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 20
-          cache: npm
-          cache-dependency-path: |
-            backend/package-lock.json
-            frontend/package-lock.json
 
       - name: Install and build backend
         working-directory: backend
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           npm run build
 
       - name: Install, typecheck, and build frontend
         working-directory: frontend
+        env:
+          VITE_GOOGLE_CLIENT_ID: 107926694606-9obo130a9mhfcfv2psn3em3b9050a9cd.apps.googleusercontent.com
         run: |
-          npm ci
+          npm ci --legacy-peer-deps
           npm run lint
           npm run build
 
@@ -60,7 +58,6 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production
     concurrency:
       group: production-vps
       cancel-in-progress: false

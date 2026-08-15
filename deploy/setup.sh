@@ -96,8 +96,8 @@ ufw --force enable
 if [[ -f "$APP_DIR/backend/.env.production" ]] && grep -q 'mongodb+srv://USER:PASS' "$APP_DIR/backend/.env.production"; then
   echo "Skipping first API start until .env.production is filled in."
 else
-  sudo -u brosai bash -lc "cd $APP_DIR/backend && npm ci && npm run build"
-  sudo -u brosai bash -lc "cd $APP_DIR/frontend && npm ci && npm run build"
+  sudo -u brosai bash -lc "cd $APP_DIR/backend && npm ci --legacy-peer-deps && npm run build"
+  sudo -u brosai bash -lc "cd $APP_DIR/frontend && npm ci --legacy-peer-deps && npm run build"
   systemctl daemon-reload
   systemctl enable --now brosai-api
 fi
