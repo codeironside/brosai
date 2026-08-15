@@ -97,10 +97,10 @@ jobs:
           PORT="${VPS_PORT:-22}"
           RSH="ssh -p ${PORT} -o StrictHostKeyChecking=yes"
           ssh -p "${PORT}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" 'mkdir -p /opt/brosai/backend/dist /opt/brosai/frontend/dist /opt/brosai/deploy'
-          rsync -az --delete -e "${RSH}" backend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/dist/"
-          rsync -az -e "${RSH}" backend/package.json backend/package-lock.json "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/"
-          rsync -az --delete -e "${RSH}" frontend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/frontend/dist/"
-          rsync -az --delete -e "${RSH}" deploy/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/deploy/"
+          rsync -rlz --delete --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" backend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/dist/"
+          rsync -rlz --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" backend/package.json backend/package-lock.json "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/"
+          rsync -rlz --delete --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" frontend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/frontend/dist/"
+          rsync -rlz --delete --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" deploy/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/deploy/"
 
       - name: Restart services and health-check
         env:
