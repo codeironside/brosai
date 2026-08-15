@@ -28,7 +28,7 @@ if [[ -f "$APP_DIR/deploy/brosai-api.service" ]]; then
   systemctl daemon-reload
 fi
 
-sudo -u brosai bash -lc "cd $APP_DIR/backend && npm ci --omit=dev"
+sudo -u brosai bash -lc "cd $APP_DIR/backend && npm ci --omit=dev --legacy-peer-deps"
 
 systemctl restart brosai-api
 nginx -t
