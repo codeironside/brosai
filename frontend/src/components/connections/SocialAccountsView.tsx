@@ -15,6 +15,7 @@ export interface SocialPlatformItem {
 }
 
 const HIDDEN_PLATFORMS: PlatformId[] = ['instagram', 'youtube', 'tiktok'];
+const OAUTH_MESSAGE_TYPE = 'brosai-social-oauth';
 
 const INITIAL_PLATFORMS: SocialPlatformItem[] = [
   { platform: 'linkedin', name: 'LinkedIn', connected: false },
