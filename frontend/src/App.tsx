@@ -14,6 +14,7 @@ import { DashboardPageView } from './components/pages/DashboardPageView';
 import { LegalPageView } from './components/pages/LegalPageView';
 import { HLSVideo } from './components/common/HLSVideo';
 import { SquashHamburger } from './components/common/SquashHamburger';
+import { GoogleOneTap } from './components/common/GoogleOneTap';
 
 type PageRoute = 'home' | 'modules' | 'clientele' | 'services' | 'about' | 'signin' | 'dashboard' | 'privacy' | 'terms';
 
@@ -148,7 +149,7 @@ function VamvamvamAIHeroContent() {
             }}
             className="rounded-full px-5 py-2.5 text-sm font-medium text-white btn-cta-gradient flex items-center justify-center transition-all hover:opacity-90 shadow-lg"
           >
-            {isAuthenticated ? 'Sign out' : 'Get started'}
+            {isAuthenticated ? 'Sign out' : 'Continue with Google'}
           </motion.button>
         </div>
 
@@ -223,7 +224,7 @@ function VamvamvamAIHeroContent() {
                   }}
                   className="w-full rounded-full py-3.5 text-base font-medium text-white btn-cta-gradient text-center shadow-lg"
                 >
-                  {isAuthenticated ? 'Sign out' : 'Get started'}
+                  {isAuthenticated ? 'Sign out' : 'Continue with Google'}
                 </motion.button>
               </div>
             </motion.div>
@@ -296,7 +297,7 @@ function VamvamvamAIHeroContent() {
                       onClick={() => navigateTo(isAuthenticated ? 'dashboard' : 'signin')}
                       className="rounded-full px-7 py-3 text-sm font-semibold text-white btn-cta-gradient shadow-xl flex items-center gap-2 transition-all"
                     >
-                      <span>{isAuthenticated ? 'Open dashboard' : 'Get Started Free'}</span>
+                      <span>{isAuthenticated ? 'Open dashboard' : 'Continue with Google'}</span>
                       <ArrowRight className="w-4 h-4" />
                     </motion.button>
                   </motion.div>
@@ -420,6 +421,7 @@ function VamvamvamAIHeroContent() {
 export function App() {
   return (
     <AppProvider>
+      <GoogleOneTap />
       <VamvamvamAIHeroContent />
     </AppProvider>
   );

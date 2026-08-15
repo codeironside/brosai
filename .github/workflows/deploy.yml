@@ -2,9 +2,9 @@ name: CI and production deploy
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
-    branches: [main]
+    branches: [main, dev]
   workflow_dispatch:
 
 concurrency:
@@ -37,6 +37,8 @@ jobs:
 
       - name: Install, typecheck, and build frontend
         working-directory: frontend
+        env:
+          VITE_GOOGLE_CLIENT_ID: 107926694606-9obo130a9mhfcfv2psn3em3b9050a9cd.apps.googleusercontent.com
         run: |
           npm ci
           npm run lint
@@ -60,7 +62,6 @@ jobs:
     needs: build
     if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    environment: production
     concurrency:
       group: production-vps
       cancel-in-progress: false

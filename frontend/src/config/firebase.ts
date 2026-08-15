@@ -3,6 +3,7 @@ import {
   getAuth,
   GoogleAuthProvider,
   signInWithPopup,
+  signInWithCredential,
   signOut,
   User as FirebaseUser,
   sendEmailVerification,
@@ -11,7 +12,7 @@ import { getStorage, ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 
 const firebaseConfig = {
   apiKey: "AIzaSyBB_s1Z0gzlY1LFpUEhqrNpYkjUjpR_UBU",
-  authDomain: "ajeoba-web-storage.firebaseapp.com",
+  authDomain: (import.meta as any).env?.VITE_FIREBASE_AUTH_DOMAIN || "ajeoba-web-storage.firebaseapp.com",
   projectId: "ajeoba-web-storage",
   storageBucket: "ajeoba-web-storage.firebasestorage.app",
   messagingSenderId: "464339029509",
@@ -19,13 +20,32 @@ const firebaseConfig = {
   measurementId: "G-05833Q7N71"
 };
 
-// Initialize Firebase App
-export const app = initializeApp(firebaseConfig);
+export const googleWebClientId = String(
+  (import.meta as any).env?.VITE_GOOGLE_CLIENT_ID
+  || '107926694606-9obo130a9mhfcfv2psn3em3b9050a9cd.apps.googleusercontent.com'
+).trim();
 
-// Initialize Firebase Auth
+export const app = initializeApp(firebaseConfig);
 export const auth = getAuth(app);
 export const googleProvider = new GoogleAuthProvider();
+googleProvider.setCustomParameters({ prompt: 'select_account' });
+googleProvider.addScope('email');
+googleProvider.addScope('profile');
 export const storage = getStorage(app);
+
+function friendlyAuthError(error: any): string {
+  const code = error?.code || '';
+  if (code === 'auth/unauthorized-domain') {
+    return 'This website domain is not yet allowed for Google sign-in. Add vamvamvamai.com in Firebase Authentication → Settings → Authorized domains.';
+  }
+  if (code === 'auth/popup-closed-by-user' || code === 'auth/cancelled-popup-request') {
+    return 'Google sign-in was closed before finishing. Try Continue with Google again.';
+  }
+  if (code === 'auth/popup-blocked') {
+    return 'Your browser blocked the Google window. Allow popups for this site, then try again.';
+  }
+  return error?.message || 'Failed to sign in with Google';
+}
 
 export async function uploadUserMedia(
   userId: string,
@@ -84,8 +104,20 @@ export const loginWithGoogleOAuth = async () => {
 
     return {
       success: false,
-      error: error?.message || 'Failed to sign in with Google OAuth',
+      error: friendlyAuthError(error),
     };
+  }
+};
+
+export const loginWithGoogleIdToken = async (idToken: string) => {
+  try {
+    const credential = GoogleAuthProvider.credential(idToken);
+    const result = await signInWithCredential(auth, credential);
+    const token = await result.user.getIdToken();
+    return { success: true as const, user: result.user, token };
+  } catch (error: any) {
+    console.error('Google credential sign-in error:', error);
+    return { success: false as const, error: friendlyAuthError(error), user: undefined, token: undefined };
   }
 };
 

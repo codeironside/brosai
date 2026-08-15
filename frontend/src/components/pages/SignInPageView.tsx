@@ -133,8 +133,8 @@ export const SignInPageView: React.FC<SignInPageViewProps> = ({ onLoginSuccess }
 
           <p className="text-xs sm:text-sm md:text-base text-white/80 leading-relaxed font-light">
             {isAuthenticated
-              ? 'You are securely authenticated via Firebase Google OAuth. Your active AI agents are running continuously in the background.'
-              : 'Sign in with Google OAuth to verify identity, manage active agent pipelines, and configure brand safety rules.'}
+              ? 'You are signed in with Google. Your AI agents keep running in the background.'
+              : 'Continue with Google to open your workspace — the same way you would on LinkedIn.'}
           </p>
 
 
@@ -178,7 +178,7 @@ export const SignInPageView: React.FC<SignInPageViewProps> = ({ onLoginSuccess }
               </div>
 
               <div className="p-3 rounded-xl bg-blue-600/20 border border-blue-400/30 text-xs text-blue-300 space-y-1">
-                <div className="font-semibold">Firebase Google OAuth Verified</div>
+                <div className="font-semibold">Signed in with Google</div>
                 <div className="text-[11px] text-white/70">Session active & secure</div>
               </div>
 
@@ -195,8 +195,8 @@ export const SignInPageView: React.FC<SignInPageViewProps> = ({ onLoginSuccess }
           ) : (
             <div className="space-y-5">
               <div className="space-y-1">
-                <h3 className="text-base font-bold text-white">Sign In</h3>
-                <p className="text-xs text-white/70">Single Sign-On powered by Google</p>
+                <h3 className="text-base font-bold text-white">Welcome back</h3>
+                <p className="text-xs text-white/70">Use your Google account to continue</p>
               </div>
 
               {errorMsg && (
@@ -217,11 +217,11 @@ export const SignInPageView: React.FC<SignInPageViewProps> = ({ onLoginSuccess }
                   <path fill="#FBBC05" d="M5.6 14.8c-.2-.7-.4-1.5-.4-2.3s.2-1.6.4-2.3L1.9 7.3C.7 9.7 0 12.3 0 15s.7 5.3 1.9 7.7l3.7-2.9z" />
                   <path fill="#34A853" d="M12 23c3.2 0 6-1.1 8-3l-3.7-2.9c-1.1.7-2.5 1.2-4.3 1.2-3 0-5.5-2.4-6.4-5.2L1.9 16C3.7 19.7 7.5 23 12 23z" />
                 </svg>
-                <span>{loading ? 'Authenticating...' : 'Sign in with Google'}</span>
+                <span>{loading ? 'Opening Google…' : 'Continue with Google'}</span>
               </button>
 
               <p className="text-[10px] text-white/50 text-center leading-relaxed">
-                By signing in, you agree to Vamvamvam AI Enterprise Terms & SOC2 Safety Directives.
+                We only use Google to confirm it is you. By continuing you agree to the Vamvamvam AI Terms.
               </p>
             </div>
           )}
