@@ -13,10 +13,11 @@ import { oauthCallbackController } from '../api/social/controllers/oauthCallback
 
 export const createApp = (): Express => {
   const app = express();
+  app.set('trust proxy', 1);
 
   // Core Middlewares
   app.use(corsMiddleware);
-  app.use(express.json());
+  app.use(express.json({ limit: '1mb' }));
 
   // Request logger middleware
   app.use((req: Request, res: Response, next: NextFunction) => {
@@ -64,7 +65,12 @@ export const createApp = (): Express => {
   // Global Error Handler
   app.use((err: Error, req: Request, res: Response, next: NextFunction) => {
     logger.error(`Global Error Handler Caught: ${err.message}`, { stack: err.stack });
-    res.status(500).json({ success: false, error: 'Internal Server Error', message: err.message });
+    const isProd = process.env.NODE_ENV === 'production';
+    res.status(500).json({
+      success: false,
+      error: 'Internal Server Error',
+      ...(isProd ? {} : { message: err.message }),
+    });
   });
 
   return app;

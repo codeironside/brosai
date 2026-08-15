@@ -1,0 +1,50 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+# Root-only release script invoked by GitHub Actions via: sudo /usr/local/bin/brosai-release
+APP_DIR=/opt/brosai
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  echo "brosai-release must run as root"
+  exit 1
+fi
+
+install -d -o brosai -g brosai -m 2755 "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist"
+if [[ -d "$APP_DIR/backend/dist" && -n "$(ls -A "$APP_DIR/backend/dist" 2>/dev/null || true)" ]]; then
+  rm -rf "$APP_DIR/backend/dist.prev"
+  cp -a "$APP_DIR/backend/dist" "$APP_DIR/backend/dist.prev"
+fi
+if [[ -d "$APP_DIR/frontend/dist" && -n "$(ls -A "$APP_DIR/frontend/dist" 2>/dev/null || true)" ]]; then
+  rm -rf "$APP_DIR/frontend/dist.prev"
+  cp -a "$APP_DIR/frontend/dist" "$APP_DIR/frontend/dist.prev"
+fi
+
+chown -R brosai:brosai "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist" "$APP_DIR/backend/package.json" "$APP_DIR/backend/package-lock.json"
+chmod 640 "$APP_DIR/backend/.env.production" 2>/dev/null || true
+chown root:brosai "$APP_DIR/backend/.env.production" 2>/dev/null || true
+
+if [[ -f "$APP_DIR/deploy/Caddyfile" ]]; then
+  install -m 644 "$APP_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
+fi
+if [[ -f "$APP_DIR/deploy/brosai-api.service" ]]; then
+  install -m 644 "$APP_DIR/deploy/brosai-api.service" /etc/systemd/system/brosai-api.service
+  systemctl daemon-reload
+fi
+
+sudo -u brosai bash -lc "cd $APP_DIR/backend && npm ci --omit=dev"
+
+systemctl restart brosai-api
+caddy validate --config /etc/caddy/Caddyfile
+systemctl reload caddy
+
+for i in 1 2 3 4 5 6 7 8 9 10; do
+  if curl -fsS http://127.0.0.1:5000/health >/dev/null; then
+    echo "API healthy after ${i}s"
+    exit 0
+  fi
+  sleep 1
+done
+
+echo "API failed health check after restart"
+journalctl -u brosai-api -n 80 --no-pager
+exit 1

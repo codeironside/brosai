@@ -1,0 +1,23 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+APP_DIR=/opt/brosai
+
+if [[ "$(id -u)" -ne 0 ]]; then
+  echo "brosai-rollback must run as root"
+  exit 1
+fi
+
+if [[ ! -d "$APP_DIR/backend/dist.prev" || ! -d "$APP_DIR/frontend/dist.prev" ]]; then
+  echo "No previous dist backups found"
+  exit 1
+fi
+
+rm -rf "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist"
+cp -a "$APP_DIR/backend/dist.prev" "$APP_DIR/backend/dist"
+cp -a "$APP_DIR/frontend/dist.prev" "$APP_DIR/frontend/dist"
+chown -R brosai:brosai "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist"
+
+systemctl restart brosai-api
+systemctl reload caddy
+echo "Rolled back to previous frontend/backend dist"

@@ -1,0 +1,36 @@
+[Unit]
+Description=Vamvamvam AI API
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=brosai
+Group=brosai
+WorkingDirectory=/opt/brosai/backend
+Environment=NODE_ENV=production
+EnvironmentFile=/opt/brosai/backend/.env.production
+ExecStart=/usr/bin/node dist/server.js
+Restart=always
+RestartSec=5
+KillSignal=SIGTERM
+TimeoutStopSec=20
+LimitNOFILE=65535
+
+NoNewPrivileges=true
+PrivateTmp=true
+PrivateDevices=true
+ProtectSystem=strict
+ProtectHome=true
+ProtectKernelTunables=true
+ProtectKernelModules=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+RestrictRealtime=true
+LockPersonality=true
+MemoryDenyWriteExecute=false
+SystemCallArchitectures=native
+ReadWritePaths=/tmp
+
+[Install]
+WantedBy=multi-user.target

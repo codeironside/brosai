@@ -41,6 +41,9 @@ function isAllowedOAuthOrigin(origin: string): boolean {
     'http://localhost:5000',
     'http://127.0.0.1:5000',
     'http://localhost:5173',
+    'https://vamvamvamai.com',
+    'https://www.vamvamvamai.com',
+    'https://api.vamvamvamai.com',
     'https://evidence-documented-syndication-maryland.trycloudflare.com',
     'https://poker-featured-very-tons.trycloudflare.com',
   ]);

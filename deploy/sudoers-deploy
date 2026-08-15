@@ -1,0 +1,3 @@
+# Copied to /etc/sudoers.d/brosai-deploy
+deploy ALL=(root) NOPASSWD: /usr/local/bin/brosai-release
+deploy ALL=(root) NOPASSWD: /usr/local/bin/brosai-rollback

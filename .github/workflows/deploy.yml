@@ -1,0 +1,121 @@
+name: CI and production deploy
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: |
+            backend/package-lock.json
+            frontend/package-lock.json
+
+      - name: Install and build backend
+        working-directory: backend
+        run: |
+          npm ci
+          npm run build
+
+      - name: Install, typecheck, and build frontend
+        working-directory: frontend
+        run: |
+          npm ci
+          npm run lint
+          npm run build
+
+      - name: Upload release artifacts
+        if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+        uses: actions/upload-artifact@v4
+        with:
+          name: release
+          retention-days: 7
+          path: |
+            backend/dist
+            backend/package.json
+            backend/package-lock.json
+            frontend/dist
+            deploy
+
+  deploy:
+    name: Deploy to VPS
+    needs: build
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    concurrency:
+      group: production-vps
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/download-artifact@v4
+        with:
+          name: release
+
+      - name: Install SSH key
+        uses: webfactory/ssh-agent@v0.9.0
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_KEY }}
+
+      - name: Trust VPS host key
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+          VPS_SSH_KNOWN_HOSTS: ${{ secrets.VPS_SSH_KNOWN_HOSTS }}
+        run: |
+          mkdir -p ~/.ssh
+          chmod 700 ~/.ssh
+          if [ -n "${VPS_SSH_KNOWN_HOSTS}" ]; then
+            echo "${VPS_SSH_KNOWN_HOSTS}" >> ~/.ssh/known_hosts
+          else
+            ssh-keyscan -p "${VPS_PORT:-22}" -t ed25519,rsa "${VPS_HOST}" >> ~/.ssh/known_hosts
+          fi
+          chmod 600 ~/.ssh/known_hosts
+
+      - name: Rsync release to VPS
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          PORT="${VPS_PORT:-22}"
+          RSH="ssh -p ${PORT} -o StrictHostKeyChecking=yes"
+          ssh -p "${PORT}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" 'mkdir -p /opt/brosai/backend/dist /opt/brosai/frontend/dist /opt/brosai/deploy'
+          rsync -az --delete -e "${RSH}" backend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/dist/"
+          rsync -az -e "${RSH}" backend/package.json backend/package-lock.json "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/"
+          rsync -az --delete -e "${RSH}" frontend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/frontend/dist/"
+          rsync -az --delete -e "${RSH}" deploy/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/deploy/"
+
+      - name: Restart services and health-check
+        env:
+          VPS_HOST: ${{ secrets.VPS_HOST }}
+          VPS_USER: ${{ secrets.VPS_USER }}
+          VPS_PORT: ${{ secrets.VPS_PORT }}
+        run: |
+          ssh -p "${VPS_PORT:-22}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" 'sudo /usr/local/bin/brosai-release'
+
+      - name: Verify public HTTPS
+        run: |
+          for url in https://api.vamvamvamai.com/health https://vamvamvamai.com/; do
+            echo "Checking ${url}"
+            curl -fsSI --max-time 30 "${url}" | head -n 20
+          done

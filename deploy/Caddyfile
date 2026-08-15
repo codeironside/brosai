@@ -1,0 +1,68 @@
+{
+	email admin@vamvamvamai.com
+	auto_https on
+	servers {
+		protocols h1 h2 h3
+	}
+}
+
+(tls_strict) {
+	tls {
+		protocols tls1.2 tls1.3
+	}
+}
+
+(security_headers) {
+	header {
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options nosniff
+		X-Frame-Options DENY
+		Referrer-Policy strict-origin-when-cross-origin
+		Permissions-Policy "accelerometer=(), camera=(), geolocation=(), gyroscope=(), magnetometer=(), microphone=(), payment=(), usb=()"
+		X-DNS-Prefetch-Control off
+		-Server
+	}
+}
+
+www.vamvamvamai.com {
+	import tls_strict
+	redir https://vamvamvamai.com{uri} permanent
+}
+
+vamvamvamai.com {
+	import tls_strict
+	import security_headers
+	encode gzip zstd
+	header Content-Security-Policy "upgrade-insecure-requests"
+
+	request_body {
+		max_size 2MB
+	}
+
+	handle /api/* {
+		reverse_proxy 127.0.0.1:5000
+	}
+
+	handle /health {
+		reverse_proxy 127.0.0.1:5000
+	}
+
+	handle {
+		root * /opt/brosai/frontend/dist
+		try_files {path} /index.html
+		file_server
+		header /assets/* Cache-Control "public, max-age=31536000, immutable"
+	}
+}
+
+api.vamvamvamai.com {
+	import tls_strict
+	import security_headers
+	encode gzip zstd
+
+	request_body {
+		max_size 2MB
+	}
+
+	reverse_proxy 127.0.0.1:5000
+}
