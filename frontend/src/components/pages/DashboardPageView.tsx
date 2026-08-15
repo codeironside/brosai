@@ -18,6 +18,7 @@ import { AiManagerConfigView } from '../dashboard/AiManagerConfigView';
 import { KnowledgeBaseView } from '../dashboard/KnowledgeBaseView';
 import { ProfileSettingsView } from '../dashboard/ProfileSettingsView';
 import { AgentRunsView } from '../dashboard/AgentRunsView';
+import { LiveTracesView } from '../dashboard/LiveTracesView';
 import { DashboardOverviewView } from '../dashboard/DashboardOverviewView';
 
 export const DashboardPageView: React.FC = () => {
@@ -144,7 +145,8 @@ export const DashboardPageView: React.FC = () => {
         {activeTab === 'hire-ai' && <AiManagerConfigView />}
         {activeTab === 'settings' && <ProfileSettingsView />}
         {activeTab === 'runs' && <AgentRunsView />}
-        {['traces', 'approvals', 'errors', 'usage'].includes(activeTab) && (
+        {activeTab === 'traces' && <LiveTracesView />}
+        {['approvals', 'errors', 'usage'].includes(activeTab) && (
           <div className="p-6 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 text-sm text-white/70">
             This panel is coming next. Use Agent Runs to start and stop your hired AI.
             </div>

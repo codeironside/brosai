@@ -110,6 +110,10 @@ const UserSchema = new mongoose.Schema({
     startedAt: Date,
     stoppedAt: Date,
     lastTickAt: Date,
+    nextDueAt: Date,
+    lastPhase: { type: String, default: 'idle' },
+    lastRunId: String,
+    shutdownAt: Date,
     tickCount: { type: Number, default: 0 }
   },
 
@@ -118,7 +122,7 @@ const UserSchema = new mongoose.Schema({
       id: String,
       runId: String,
       agentName: String,
-      status: { type: String, enum: ['awaiting', 'succeeded', 'failed'], default: 'awaiting' },
+      status: { type: String, enum: ['awaiting', 'publishing', 'succeeded', 'failed'], default: 'awaiting' },
       toolsCount: Number,
       latencyPercent: Number,
       tokens: String,
@@ -126,7 +130,17 @@ const UserSchema = new mongoose.Schema({
       started: String,
       approvalMode: { type: String, default: 'manual' },
       approved: Boolean,
-      createdAt: { type: Date, default: Date.now }
+      createdAt: { type: Date, default: Date.now },
+      draft: String,
+      platforms: [String],
+      note: String,
+      traces: [{ at: Date, label: String }],
+      analytics: {
+        impressions: { type: Number, default: 0 },
+        likes: { type: Number, default: 0 },
+        comments: { type: Number, default: 0 },
+        shares: { type: Number, default: 0 }
+      }
     }
   ],
 

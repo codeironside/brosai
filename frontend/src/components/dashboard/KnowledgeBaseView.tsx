@@ -2,7 +2,6 @@ import React, { useEffect, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { Brain, Globe, Upload, Sparkles, Check, FileText, Plus, Trash2, Save, Pencil } from 'lucide-react';
 import { GlassSelect } from '../common/GlassSelect';
-import { WhatsAppChat } from '../common/WhatsAppChat';
 
 const TONE_PRESETS = [
   'Professional yet conversational',
@@ -766,13 +765,6 @@ export const KnowledgeBaseView: React.FC = () => {
           </div>
         </div>
       )}
-
-      <WhatsAppChat
-        channel="brand-brain"
-        title={selected?.brandName || 'Brand Brain'}
-        placeholder="Ask about your brand…"
-        brandId={selected?.id}
-      />
     </div>
   );
 };

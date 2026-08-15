@@ -10,6 +10,7 @@ import {
   buildAuthorizationUrl,
   completeOAuth,
   isPlatformOfferedToUsers,
+  listFacebookPages,
   normalizePlatform,
   redirectUriFor
 } from './platformOAuth.js';
@@ -20,6 +21,7 @@ import {
   upsertConnectedAccount
 } from './socialAccountStore.js';
 import { UserModel } from '../../auth/models/userModel.js';
+import { encryptSecret } from '../../../core/crypto/tokenVault.js';
 
 const SESSION_TTL_MS = 10 * 60 * 1000;
 
@@ -40,7 +42,7 @@ export class SocialAdapterService {
     return listPublicAccounts(dbUser?.socialAccounts || []);
   }
 
-  async startOAuth(userId: string, rawPlatform: string): Promise<{ success: boolean; platform: SocialPlatform; oauthUrl: string }> {
+  async startOAuth(userId: string, rawPlatform: string): Promise<{ success: boolean; platform: SocialPlatform; oauthUrl: string; redirectUri: string }> {
     const platform = normalizePlatform(rawPlatform);
     if (!isPlatformOfferedToUsers(platform)) {
       throw new Error(`${PLATFORM_META[platform].name} is not available yet.`);
@@ -71,7 +73,13 @@ export class SocialAdapterService {
     state?: string;
     error?: string;
     error_description?: string;
-  }): Promise<{ platform: SocialPlatform; handle: string }> {
+  }): Promise<{
+    platform: SocialPlatform;
+    handle: string;
+    needsPageSelection?: boolean;
+    pages?: Array<{ id: string; name: string; avatarUrl?: string }>;
+    state?: string;
+  }> {
     if (query.error) {
       throw new Error(query.error_description || query.error);
     }
@@ -86,6 +94,42 @@ export class SocialAdapterService {
 
     const platform = normalizePlatform(session.platform);
     try {
+      if (platform === 'facebook') {
+        const pages = await listFacebookPages(query.code, session.redirectUri);
+        if (pages.length === 1) {
+          await upsertConnectedAccount(String(session.userId), platform, pages[0]);
+          await OAuthSessionModel.deleteOne({ _id: session._id });
+          logger.info(`[Social Service] Connected facebook as ${pages[0].handle}`);
+          return { platform, handle: pages[0].handle };
+        }
+
+        session.pendingPages = pages.map((page) => ({
+          accountId: page.accountId,
+          handle: page.handle,
+          displayName: page.displayName,
+          avatarUrl: page.avatarUrl,
+          accessTokenEnc: encryptSecret(page.accessToken),
+          refreshTokenEnc: page.refreshToken ? encryptSecret(page.refreshToken) : undefined,
+          expiresIn: page.expiresIn,
+          tokenType: page.tokenType,
+          scopes: page.scopes
+        }));
+        session.expiresAt = new Date(Date.now() + SESSION_TTL_MS);
+        await session.save();
+
+        return {
+          platform,
+          handle: '',
+          needsPageSelection: true,
+          state: session.state,
+          pages: pages.map((page) => ({
+            id: page.accountId,
+            name: page.displayName || page.handle,
+            avatarUrl: page.avatarUrl
+          }))
+        };
+      }
+
       const profile = await completeOAuth({
         platform,
         code: query.code,
@@ -102,6 +146,36 @@ export class SocialAdapterService {
       await OAuthSessionModel.deleteOne({ _id: session._id });
       throw error;
     }
+  }
+
+  async selectFacebookPage(userId: string, pageId: string, state?: string): Promise<PublicSocialAccount[]> {
+    const session = state
+      ? await OAuthSessionModel.findOne({ state, userId, platform: 'facebook' })
+      : await OAuthSessionModel.findOne({ userId, platform: 'facebook', pendingPages: { $exists: true } }).sort({ createdAt: -1 });
+
+    if (!session || !Array.isArray(session.pendingPages) || !session.pendingPages.length) {
+      throw new Error('Facebook page list expired. Connect Facebook again.');
+    }
+
+    const pending = session.pendingPages.find((item: any) => String(item.accountId) === String(pageId));
+    if (!pending) {
+      throw new Error('That Facebook Page is not in the authorized list.');
+    }
+
+    const { decryptSecret } = await import('../../../core/crypto/tokenVault.js');
+    await upsertConnectedAccount(userId, 'facebook', {
+      accountId: String(pending.accountId),
+      handle: pending.handle,
+      displayName: pending.displayName || pending.handle,
+      avatarUrl: pending.avatarUrl,
+      accessToken: decryptSecret(pending.accessTokenEnc),
+      refreshToken: pending.refreshTokenEnc ? decryptSecret(pending.refreshTokenEnc) : undefined,
+      expiresIn: pending.expiresIn,
+      tokenType: pending.tokenType,
+      scopes: pending.scopes
+    });
+    await OAuthSessionModel.deleteOne({ _id: session._id });
+    return this.listAccounts(userId);
   }
 
   async disconnect(userId: string, rawPlatform: string): Promise<PublicSocialAccount[]> {

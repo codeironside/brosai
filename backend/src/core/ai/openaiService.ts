@@ -8,7 +8,8 @@ export class OpenAIService {
   async generateCompletion(
     prompt: string,
     systemInstruction?: string,
-    history: Array<{ role: string; content: string }> = []
+    history: Array<{ role: string; content: string }> = [],
+    options: { temperature?: number; maxTokens?: number } = {}
   ): Promise<string> {
     const apiKey = config.ai.openaiApiKey;
     if (!apiKey) {
@@ -34,8 +35,8 @@ export class OpenAIService {
           })),
           { role: 'user', content: prompt }
         ],
-        temperature: 0.7,
-        max_tokens: 1000
+        temperature: options.temperature ?? 0.7,
+        max_tokens: options.maxTokens ?? 1000
       })
     });
 
@@ -102,6 +103,32 @@ export class OpenAIService {
             required: ['query']
           }
         }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'list_connected_accounts',
+          description: 'List social accounts the customer has connected. Use before offering a dry-run post.',
+          parameters: { type: 'object', properties: {} }
+        }
+      },
+      {
+        type: 'function',
+        function: {
+          name: 'publish_social_post',
+          description: 'Publish a finished post to connected networks. Call ONLY after the user clearly says to go ahead, post it, publish, or send it. Never on the first draft.',
+          parameters: {
+            type: 'object',
+            properties: {
+              text: { type: 'string', description: 'Exact post text to publish' },
+              platforms: {
+                type: 'string',
+                description: 'Comma-separated platforms: twitter,facebook,linkedin,threads. Empty means all connected.'
+              }
+            },
+            required: ['text']
+          }
+        }
       }
     ];
 
@@ -147,10 +174,12 @@ export class OpenAIService {
         return { reply: String(message.content || ''), usedWeb };
       }
 
-      usedWeb = true;
       messages.push(message);
       for (const call of toolCalls) {
         const name = call.function?.name || '';
+        if (name === 'fetch_webpage' || name === 'fetch_website' || name === 'search_web') {
+          usedWeb = true;
+        }
         let args: Record<string, string> = {};
         try {
           args = JSON.parse(call.function?.arguments || '{}');

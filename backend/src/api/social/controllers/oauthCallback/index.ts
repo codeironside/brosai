@@ -7,6 +7,9 @@ function callbackPage(payload: {
   platform?: string;
   handle?: string;
   error?: string;
+  needsPageSelection?: boolean;
+  pages?: Array<{ id: string; name: string; avatarUrl?: string }>;
+  state?: string;
 }): string {
   const origin = socialAdapterService.getFrontendOrigin();
   const safePayload = JSON.stringify({
@@ -14,13 +17,20 @@ function callbackPage(payload: {
     success: payload.success,
     platform: payload.platform || null,
     handle: payload.handle || null,
-    error: payload.error || null
+    error: payload.error || null,
+    needsPageSelection: Boolean(payload.needsPageSelection),
+    pages: payload.pages || [],
+    state: payload.state || null
   }).replace(/</g, '\\u003c');
 
-  const title = payload.success ? 'Account connected' : 'Connection failed';
-  const body = payload.success
-    ? `${payload.platform || 'Account'} is connected${payload.handle ? ` as ${payload.handle}` : ''}. You can close this window.`
-    : payload.error || 'Social account connection failed.';
+  const title = payload.needsPageSelection
+    ? 'Choose a Facebook Page'
+    : payload.success ? 'Account connected' : 'Connection failed';
+  const body = payload.needsPageSelection
+    ? 'Pick which Facebook Page to connect in the main window.'
+    : payload.success
+      ? `${payload.platform || 'Account'} is connected${payload.handle ? ` as ${payload.handle}` : ''}. You can close this window.`
+      : payload.error || 'Social account connection failed.';
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -75,7 +85,10 @@ export const oauthCallbackController = async (req: Request, res: Response): Prom
     res.status(200).send(callbackPage({
       success: true,
       platform: result.platform,
-      handle: result.handle
+      handle: result.handle,
+      needsPageSelection: result.needsPageSelection,
+      pages: result.pages,
+      state: result.state
     }));
   } catch (error: any) {
     logger.error(`OAuth callback failed: ${error.message}`);

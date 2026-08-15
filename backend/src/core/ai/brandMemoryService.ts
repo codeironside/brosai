@@ -212,7 +212,7 @@ export class BrandMemoryService {
     userId: string,
     userMessage: string,
     history: Array<{ role: string; content: string }> = [],
-    options: { threadId?: string; managerId?: string; brandId?: string } = {}
+    options: { threadId?: string; managerId?: string; brandId?: string; channel?: 'hireAi' | 'brandBrain' } = {}
   ): Promise<{
     reply: string;
     sources: RankedMemory[];
@@ -312,10 +312,61 @@ ${otherChats}`;
           }
           return `TITLE: ${page.title}\nURL: ${page.url}\n\n${page.text}`;
         }
+        if (name === 'list_connected_accounts') {
+          const { listConnectedPublishTargets } = await import('../../api/social/services/socialPublishService.js');
+          const targets = await listConnectedPublishTargets(userId);
+          if (!targets.length) return 'No social accounts connected yet.';
+          return targets.map((item) => `${item.platform}: ${item.handle}`).join('\n');
+        }
+        if (name === 'publish_social_post') {
+          if (options.channel === 'brandBrain') {
+            return 'Publishing is done from Hire AI, not Brand Brain.';
+          }
+          const { publishSocialPost } = await import('../../api/social/services/socialPublishService.js');
+          const platforms = String(args.platforms || '')
+            .split(',')
+            .map((item) => item.trim())
+            .filter(Boolean);
+          return publishSocialPost(userId, args.text || '', platforms);
+        }
         return `Unknown tool: ${name}`;
       }
     });
     return { reply: result.reply, sources, usedWeb: result.usedWeb };
+  }
+
+  async generateDryRunPost(userId: string, managerId?: string): Promise<{ text: string; platforms: string[]; managerName: string }> {
+    const dbUser = await UserModel.findById(userId);
+    if (!dbUser) throw new Error('User not found');
+    const { assertReadyToRun, listManagers, activeManager } = await import('../../api/auth/services/workspaceProfiles.js');
+    const managers = listManagers(dbUser);
+    const manager = (managerId && managers.find((item: any) => item.id === managerId)) || activeManager(managers);
+    if (!manager) throw new Error('Hire an AI first.');
+    assertReadyToRun(dbUser, manager);
+    const { connectedPlatforms } = await import('../../api/auth/services/workspaceProfiles.js');
+    const linked = connectedPlatforms(dbUser);
+    const platforms = (Array.isArray(manager.postTo) ? manager.postTo : []).filter((item: string) => linked.includes(item));
+    const previous = (dbUser.agentRuns || [])
+      .map((item: any) => String(item.draft || '').trim())
+      .filter(Boolean)
+      .slice(0, 6);
+    const angles = ['a sharp question', 'a concrete customer story', 'one surprising stat', 'a short how-to', 'a bold claim plus proof', 'a call to action'];
+    const angle = angles[Math.floor(Math.random() * angles.length)];
+    const brandCard = this.formatBrandCard(dbUser, { managerId: manager.id, brandId: manager.brandId });
+    const { openAIService } = await import('./openaiService.js');
+    const text = (await openAIService.generateCompletion(
+      [
+        `Write one ready-to-publish social post using ${angle}.`,
+        'Keep it under 450 characters so it fits Threads.',
+        'Output only the post text. No title, quotes, or preamble.',
+        previous.length ? `Do not repeat or lightly rephrase these earlier drafts:\n${previous.map((item: string, i: number) => `${i + 1}. ${item}`).join('\n')}` : ''
+      ].filter(Boolean).join('\n'),
+      `You are ${manager.name || 'the hired AI'}. Write in this brand voice only. Vary the hook, structure, and wording every time.\n\n${brandCard}`,
+      [],
+      { temperature: 1.05, maxTokens: 220 }
+    )).trim().replace(/^["']|["']$/g, '');
+    if (!text) throw new Error('empty');
+    return { text, platforms, managerName: manager.name || 'Hired AI' };
   }
 
   chatMemoryParentId(threadId: string) {

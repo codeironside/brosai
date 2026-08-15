@@ -44,7 +44,7 @@ export interface ConnectedProfile {
 export const PLATFORM_META: Record<SocialPlatform, PlatformMeta> = {
   linkedin: {
     platform: 'linkedin',
-    name: 'LinkedIn Organization Page',
+    name: 'LinkedIn',
     capabilities: {
       publishText: true, publishMedia: true, publishVideo: true,
       readComments: true, replyComments: true,
@@ -245,8 +245,11 @@ export async function completeOAuth(params: {
       return connectTwitter(code, redirectUri, codeVerifier);
     case 'linkedin':
       return connectLinkedIn(code, redirectUri, codeVerifier);
-    case 'facebook':
-      return connectFacebook(code, redirectUri);
+    case 'facebook': {
+      const pages = await listFacebookPages(code, redirectUri);
+      if (pages.length === 1) return pages[0];
+      throw new Error('Select which Facebook Page to connect');
+    }
     case 'threads':
       return connectThreads(code, redirectUri);
     case 'instagram':
@@ -317,7 +320,9 @@ async function connectTwitter(code: string, redirectUri: string, codeVerifier: s
     accountId: String(user.id),
     handle: user.username ? `@${user.username}` : `@user_${user.id}`,
     displayName: user.name || user.username || 'X account',
-    avatarUrl,
+    avatarUrl: avatarUrl
+      ? String(avatarUrl).replace('_normal.', '_400x400.').replace('_bigger.', '_400x400.')
+      : avatarUrl,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
     expiresIn: tokens.expires_in,
@@ -338,24 +343,22 @@ async function connectLinkedIn(code: string, redirectUri: string, _codeVerifier:
   const profile = await getJson('https://api.linkedin.com/v2/userinfo', {
     Authorization: `Bearer ${tokens.access_token}`
   });
-
-  const handle = profile.email || profile.name || profile.sub;
   if (!profile.sub) throw new Error('LinkedIn did not return an OpenID subject');
 
   return {
     accountId: String(profile.sub),
-    handle: handle ? String(handle) : `linkedin_${profile.sub}`,
+    handle: profile.name || profile.email || `linkedin_${profile.sub}`,
     displayName: profile.name || 'LinkedIn member',
     avatarUrl: profile.picture,
     accessToken: tokens.access_token,
     refreshToken: tokens.refresh_token,
     expiresIn: tokens.expires_in,
     tokenType: tokens.token_type,
-    scopes: tokens.scope
+    scopes: 'person'
   };
 }
 
-async function connectFacebook(code: string, redirectUri: string): Promise<ConnectedProfile> {
+export async function listFacebookPages(code: string, redirectUri: string): Promise<ConnectedProfile[]> {
   const shortLived = await getJson(
     `https://graph.facebook.com/v21.0/oauth/access_token?client_id=${encodeURIComponent(config.social.facebook.appId)}&redirect_uri=${encodeURIComponent(redirectUri)}&client_secret=${encodeURIComponent(config.social.facebook.appSecret)}&code=${encodeURIComponent(code)}`
   );
@@ -371,12 +374,12 @@ async function connectFacebook(code: string, redirectUri: string): Promise<Conne
     config.social.facebook.appSecret
   );
 
-  const page = pages.data?.[0];
-  if (!page?.id || !page.access_token) {
+  const list = (pages.data || []).filter((page: any) => page?.id && page.access_token);
+  if (!list.length) {
     throw new Error('No Facebook Page found on this account. Create or grant access to a Page, then reconnect.');
   }
 
-  return {
+  return list.map((page: any) => ({
     accountId: String(page.id),
     handle: page.name || `page_${page.id}`,
     displayName: page.name || 'Facebook Page',
@@ -386,11 +389,12 @@ async function connectFacebook(code: string, redirectUri: string): Promise<Conne
     expiresIn: longLived.expires_in || shortLived.expires_in,
     tokenType: 'bearer',
     scopes: 'pages'
-  };
+  }));
 }
 
 async function connectInstagramViaFacebook(code: string, redirectUri: string): Promise<ConnectedProfile> {
-  const facebook = await connectFacebook(code, redirectUri);
+  const facebookPages = await listFacebookPages(code, redirectUri);
+  const facebook = facebookPages[0];
   const pages = await graphGet(
     'https://graph.facebook.com/v21.0/me/accounts?fields=id,name,access_token,instagram_business_account{id,username,profile_picture_url,name}&limit=25',
     facebook.refreshToken || facebook.accessToken,

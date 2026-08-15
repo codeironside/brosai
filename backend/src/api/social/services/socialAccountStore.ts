@@ -93,7 +93,7 @@ export function listPublicAccounts(saved: any[] = []): PublicSocialAccount[] {
 
     return {
       platform,
-      name: found.name || meta.name,
+      name: meta.name,
       connected: Boolean(found.connected) && Boolean(found.accessTokenEnc) && !expired,
       handle: found.handle,
       avatarUrl: found.avatarUrl,

@@ -17,13 +17,20 @@ export interface SocialPlatformItem {
 const HIDDEN_PLATFORMS: PlatformId[] = ['instagram', 'youtube', 'tiktok'];
 
 const INITIAL_PLATFORMS: SocialPlatformItem[] = [
-  { platform: 'linkedin', name: 'LinkedIn Organization Page', connected: false },
+  { platform: 'linkedin', name: 'LinkedIn', connected: false },
   { platform: 'twitter', name: 'X (Twitter)', connected: false },
   { platform: 'facebook', name: 'Facebook Page', connected: false },
   { platform: 'threads', name: 'Threads', connected: false },
 ];
 
-const OAUTH_MESSAGE_TYPE = 'brosai-social-oauth';
+function displayAvatar(url?: string, platform?: PlatformId) {
+  if (!url) return '';
+  let src = url;
+  if (platform === 'twitter') {
+    src = url.replace('_normal.', '_400x400.').replace('_bigger.', '_400x400.');
+  }
+  return `/api/social/avatar?url=${encodeURIComponent(src)}`;
+}
 
 function isAllowedOAuthOrigin(origin: string): boolean {
   if (origin === window.location.origin) return true;
@@ -46,6 +53,10 @@ export const SocialAccountsView: React.FC = () => {
   const [loading, setLoading] = useState(false);
   const [connectingPlatform, setConnectingPlatform] = useState<string | null>(null);
   const [oauthModal, setOauthModal] = useState<{ platform: PlatformId; name: string } | null>(null);
+  const [pagePicker, setPagePicker] = useState<{
+    pages: Array<{ id: string; name: string; avatarUrl?: string }>;
+    state?: string;
+  } | null>(null);
   const [statusMessage, setStatusMessage] = useState<string | null>(null);
   const oauthPopupRef = React.useRef<Window | null>(null);
 
@@ -171,7 +182,7 @@ export const SocialAccountsView: React.FC = () => {
       window.clearTimeout(timeoutId);
     };
 
-    const finish = (error?: string) => {
+    const finish = (error?: string, keepMessage = false) => {
       if (settled) return;
       settled = true;
       cleanup();
@@ -180,7 +191,7 @@ export const SocialAccountsView: React.FC = () => {
         reject(new Error(error));
         return;
       }
-      setStatusMessage(`${platform} connected`);
+      if (!keepMessage) setStatusMessage(`${platform} connected`);
       resolve();
     };
 
@@ -191,6 +202,12 @@ export const SocialAccountsView: React.FC = () => {
       if (data.platform && data.platform !== platform) return;
 
       if (data.success) {
+        if (data.needsPageSelection && Array.isArray(data.pages) && data.pages.length) {
+          setPagePicker({ pages: data.pages, state: data.state || undefined });
+          setStatusMessage('Choose which Facebook Page to connect');
+          finish(undefined, true);
+          return;
+        }
         finish();
       } else {
         finish(data.error || 'Authorization was denied');
@@ -251,6 +268,24 @@ export const SocialAccountsView: React.FC = () => {
     }
   };
 
+  const selectFacebookPage = async (pageId: string) => {
+    try {
+      const res = await authenticatedFetch('/api/auth/social-accounts/select-page', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pageId, state: pagePicker?.state })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) throw new Error(json.error || 'Could not save page');
+      if (Array.isArray(json.data)) applyAccounts(json.data);
+      else await fetchSocialAccounts();
+      setPagePicker(null);
+      setStatusMessage('Facebook Page connected');
+    } catch (err) {
+      console.warn('Facebook page select failed', err);
+    }
+  };
+
   const connectedCount = platforms.filter(p => p.connected).length;
 
   return (
@@ -296,7 +331,12 @@ export const SocialAccountsView: React.FC = () => {
               <div className="flex items-center space-x-3">
                 <div className="w-10 h-10 rounded-xl bg-white/10 border border-white/25 flex items-center justify-center font-bold text-white uppercase text-xs shadow-md shrink-0 overflow-hidden">
                   {p.avatarUrl ? (
-                    <img src={p.avatarUrl} alt="" className="w-full h-full object-cover" />
+                    <img
+                      src={displayAvatar(p.avatarUrl, p.platform)}
+                      alt=""
+                      referrerPolicy="no-referrer"
+                      className="w-full h-full object-cover"
+                    />
                   ) : (
                     p.platform.slice(0, 2)
                   )}
@@ -396,6 +436,9 @@ export const SocialAccountsView: React.FC = () => {
                   <div className="flex items-center space-x-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-white" /><span>Reply Comments</span></div>
                   <div className="flex items-center space-x-1.5"><CheckCircle2 className="w-3.5 h-3.5 text-white" /><span>Analytics</span></div>
                 </div>
+                {p.platform === 'facebook' && (
+                  <p className="text-[11px] text-white/70 pt-1">After login you can choose which Facebook Page to connect.</p>
+                )}
               </div>
             )}
 
@@ -433,6 +476,46 @@ export const SocialAccountsView: React.FC = () => {
               >
                 Cancel
               </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {pagePicker && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-md rounded-2xl bg-white/10 border border-white/20 backdrop-blur-xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-white">Choose a Facebook Page</h2>
+                <p className="text-xs text-white/70 mt-1">Select the Page this AI should post to.</p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setPagePicker(null)}
+                className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10"
+                aria-label="Close"
+              >
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="space-y-2 max-h-72 overflow-y-auto">
+              {pagePicker.pages.map((page) => (
+                <button
+                  key={page.id}
+                  type="button"
+                  onClick={() => void selectFacebookPage(page.id)}
+                  className="w-full flex items-center gap-3 px-3 py-2.5 rounded-xl bg-white/10 hover:bg-white/20 border border-white/20 text-left"
+                >
+                  <div className="w-9 h-9 rounded-lg overflow-hidden bg-white/10 border border-white/20 shrink-0">
+                    {page.avatarUrl ? (
+                      <img src={page.avatarUrl} alt="" referrerPolicy="no-referrer" className="w-full h-full object-cover" />
+                    ) : (
+                      <span className="text-[10px] text-white/70 flex items-center justify-center h-full">FB</span>
+                    )}
+                  </div>
+                  <span className="text-sm text-white font-medium truncate">{page.name}</span>
+                </button>
+              ))}
             </div>
           </div>
         </div>

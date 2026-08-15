@@ -6,6 +6,7 @@ const OAuthSessionSchema = new mongoose.Schema({
   platform: { type: String, required: true },
   codeVerifier: { type: String, required: true },
   redirectUri: { type: String, required: true },
+  pendingPages: { type: mongoose.Schema.Types.Mixed, default: undefined },
   createdAt: { type: Date, default: Date.now },
   expiresAt: { type: Date, required: true, index: { expires: 0 } }
 });

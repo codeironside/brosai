@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Bot, Search, SlidersHorizontal, Download, BarChart3 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
+import { formatRunTime } from '../../utils/time';
 
 interface AgentRunItem {
   id: string;
@@ -12,6 +13,7 @@ interface AgentRunItem {
   tokens: string;
   cost: string;
   started: string;
+  createdAt?: string;
 }
 
 export const DashboardOverviewView: React.FC = () => {
@@ -19,6 +21,10 @@ export const DashboardOverviewView: React.FC = () => {
   const [searchQuery, setSearchQuery] = useState('');
   const [runs, setRuns] = useState<AgentRunItem[]>([]);
   const [cronLabel, setCronLabel] = useState('Idle');
+  const [analytics, setAnalytics] = useState({
+    total: { impressions: 0, likes: 0, comments: 0, shares: 0 },
+    perAccount: [] as Array<{ platform: string; label: string; posts: number; impressions: number; likes: number; comments: number; shares: number }>
+  });
   const [stats, setStats] = useState({
     totalRuns: 0,
     totalRunsDelta: 'No runs logged yet',
@@ -52,6 +58,10 @@ export const DashboardOverviewView: React.FC = () => {
           chartPoints: json.data.chartPoints || []
         });
         setRuns(Array.isArray(json.data.runs) ? json.data.runs : []);
+        setAnalytics({
+          total: json.data.totalAnalytics || { impressions: 0, likes: 0, comments: 0, shares: 0 },
+          perAccount: Array.isArray(json.data.perAccountAnalytics) ? json.data.perAccountAnalytics : []
+        });
         const cron = json.data.cron;
         setCronLabel(cron?.running ? `${cron.managerName || 'AI'} running` : 'Idle');
       } catch (err) {
@@ -140,6 +150,51 @@ export const DashboardOverviewView: React.FC = () => {
         </div>
       </div>
 
+      <div className="p-3.5 sm:p-5 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 space-y-4 shadow-xl">
+        <div>
+          <h2 className="text-sm font-semibold text-white">Post analytics</h2>
+          <p className="text-[11px] text-white/55 mt-0.5">Totals across every post, then a breakdown per social account.</p>
+        </div>
+        <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+          {[
+            ['Impressions', analytics.total.impressions],
+            ['Likes', analytics.total.likes],
+            ['Comments', analytics.total.comments],
+            ['Shares', analytics.total.shares],
+          ].map(([label, value]) => (
+            <div key={String(label)} className="rounded-xl bg-black/30 border border-white/10 p-3 text-center">
+              <div className="font-silkscreen text-xl text-white">{Number(value).toLocaleString()}</div>
+              <div className="text-[10px] uppercase tracking-wider text-white/50 mt-1">{label}</div>
+            </div>
+          ))}
+        </div>
+        {analytics.perAccount.length > 0 && (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {analytics.perAccount.map((account) => (
+              <div key={account.platform} className="rounded-xl bg-black/30 border border-white/10 p-3 space-y-2">
+                <div className="flex items-center justify-between">
+                  <div className="text-xs font-semibold text-white">{account.label}</div>
+                  <div className="text-[10px] text-white/45">{account.posts} post{account.posts === 1 ? '' : 's'}</div>
+                </div>
+                <div className="grid grid-cols-4 gap-1 text-center">
+                  {[
+                    ['Imp', account.impressions],
+                    ['Likes', account.likes],
+                    ['Com', account.comments],
+                    ['Shares', account.shares],
+                  ].map(([label, value]) => (
+                    <div key={String(label)}>
+                      <div className="text-xs text-white font-semibold">{Number(value).toLocaleString()}</div>
+                      <div className="text-[9px] text-white/45">{label}</div>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+
       <div className="p-3.5 sm:p-5 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 space-y-3 sm:space-y-4 shadow-2xl">
         <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3">
           <div className="flex items-center gap-3">
@@ -202,7 +257,7 @@ export const DashboardOverviewView: React.FC = () => {
                   </td>
                   <td className="py-3 px-2 font-mono">{run.tokens}</td>
                   <td className="py-3 px-2 font-mono">{run.cost}</td>
-                  <td className="py-3 px-2 text-white/70 font-mono text-[10px]">{run.started}</td>
+                  <td className="py-3 px-2 text-white/70 font-mono text-[10px]">{formatRunTime(run.createdAt, run.started)}</td>
                 </tr>
               )) : (
                 <tr>

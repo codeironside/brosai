@@ -1,20 +1,20 @@
-import React, { useEffect, useState } from 'react';
-import { Bot, Search, Play, Square } from 'lucide-react';
+import React, { useCallback, useEffect, useRef, useState } from 'react';
+import { Bot, Search, Play, Square, Sparkles, Check, X, RotateCcw } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
-import { GlassSelect } from '../common/GlassSelect';
+import { formatRunTime } from '../../utils/time';
 
 interface AgentRunItem {
   id: string;
   runId: string;
   agentName: string;
-  status: 'awaiting' | 'succeeded' | 'failed';
-  toolsCount: number;
-  latencyPercent: number;
+  status: 'awaiting' | 'publishing' | 'succeeded' | 'failed';
   tokens: string;
   cost: string;
   started: string;
-  approvalMode: 'manual' | 'auto';
-  approved?: boolean;
+  createdAt?: string;
+  draft?: string;
+  platforms?: string[];
+  note?: string;
 }
 
 interface HiredManager {
@@ -33,9 +33,6 @@ interface CronState {
   managerId: string | null;
   managerName: string | null;
   postingFrequency: string | null;
-  tickCount: number;
-  startedAt: string | null;
-  lastTickAt: string | null;
 }
 
 export const AgentRunsView: React.FC = () => {
@@ -45,48 +42,55 @@ export const AgentRunsView: React.FC = () => {
   const [runs, setRuns] = useState<AgentRunItem[]>([]);
   const [managers, setManagers] = useState<HiredManager[]>([]);
   const [selectedId, setSelectedId] = useState('');
+  const selectedIdRef = useRef('');
   const [cron, setCron] = useState<CronState | null>(null);
   const [cronBusy, setCronBusy] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [dryBusy, setDryBusy] = useState(false);
+  const [busyRunId, setBusyRunId] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
+  const [previewRun, setPreviewRun] = useState<AgentRunItem | null>(null);
   const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
   const [brands, setBrands] = useState<Array<{ id: string; brandName: string }>>([]);
   const [stats, setStats] = useState({
     totalRuns: 0,
     successRate: '0.0%',
     errorRate: 0,
-    totalCost: '$0.00',
-    successRateDelta: '0 succeeded',
-    errorRateDelta: '0 failed',
+    totalCost: '$0.00'
   });
 
-  const load = async () => {
+  const applyPayload = useCallback((data: any, lockSelection: boolean) => {
+    setStats({
+      totalRuns: data.totalRuns,
+      successRate: data.successRate,
+      errorRate: data.errorRate,
+      totalCost: data.totalCost
+    });
+    setRuns(Array.isArray(data.runs) ? data.runs : []);
+    const hired = Array.isArray(data.managers) ? data.managers : [];
+    setManagers(hired);
+    setBrands(Array.isArray(data.brands) ? data.brands : []);
+    setConnectedPlatforms(Array.isArray(data.connectedPlatforms) ? data.connectedPlatforms : []);
+    setCron(data.cron || null);
+    if (!lockSelection && !selectedIdRef.current) {
+      const nextId = data.cron?.managerId || hired.find((item: HiredManager) => item.isActive)?.id || hired[0]?.id || '';
+      selectedIdRef.current = nextId;
+      setSelectedId(nextId);
+    }
+  }, []);
+
+  const load = useCallback(async (silent = false) => {
     const res = await authenticatedFetch('/api/auth/dashboard-stats');
     const json = await res.json();
     if (!json.success || !json.data) return;
-    setStats({
-      totalRuns: json.data.totalRuns,
-      successRate: json.data.successRate,
-      errorRate: json.data.errorRate,
-      totalCost: json.data.totalCost,
-      successRateDelta: json.data.successRateDelta,
-      errorRateDelta: json.data.errorRateDelta,
-    });
-    setRuns(Array.isArray(json.data.runs) ? json.data.runs : []);
-    const hired = Array.isArray(json.data.managers) ? json.data.managers : [];
-    setManagers(hired);
-    setBrands(Array.isArray(json.data.brands) ? json.data.brands : []);
-    setConnectedPlatforms(Array.isArray(json.data.connectedPlatforms) ? json.data.connectedPlatforms : []);
-    setCron(json.data.cron || null);
-    const nextId = json.data.cron?.managerId || hired.find((item: HiredManager) => item.isActive)?.id || hired[0]?.id || '';
-    setSelectedId(nextId);
-  };
+    applyPayload(json.data, silent);
+  }, [authenticatedFetch, applyPayload]);
 
   useEffect(() => {
     let mounted = true;
     const boot = async () => {
       try {
         setLoading(true);
-        await load();
+        await load(false);
       } catch (err) {
         console.warn('Dashboard load warning:', err);
       } finally {
@@ -94,14 +98,19 @@ export const AgentRunsView: React.FC = () => {
       }
     };
     boot();
-    const timer = setInterval(() => {
-      load().catch(() => undefined);
-    }, 8000);
+    const timer = window.setInterval(() => {
+      load(true).catch(() => undefined);
+    }, 12000);
     return () => {
       mounted = false;
-      clearInterval(timer);
+      window.clearInterval(timer);
     };
-  }, [authenticatedFetch]);
+  }, [load]);
+
+  const pickManager = (id: string) => {
+    selectedIdRef.current = id;
+    setSelectedId(id);
+  };
 
   const selected = managers.find((item) => item.id === selectedId);
   const blockers = [
@@ -116,27 +125,141 @@ export const AgentRunsView: React.FC = () => {
 
   const canStart = Boolean(selectedId && managers.length && !blockers.length);
 
-  const toggleCron = async (start: boolean) => {
-    if (start && blockers.length) {
-      setError(blockers[0]);
+  const startCron = async () => {
+    if (blockers.length) {
+      setNotice(blockers[0]);
       return;
     }
-    setError(null);
+    setNotice(null);
     try {
       setCronBusy(true);
-      const res = await authenticatedFetch(start ? '/api/auth/ai-cron/start' : '/api/auth/ai-cron/stop', {
+      const res = await authenticatedFetch('/api/auth/ai-cron/start', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ managerId: selectedId })
       });
       const json = await res.json();
-      if (!res.ok || !json.success) throw new Error(json.error || 'Could not update cron');
+      if (!res.ok || !json.success) {
+        setNotice(blockers[0] || 'Could not start the AI right now.');
+        return;
+      }
       setCron(json.data);
-      await load();
-    } catch (err: any) {
-      setError(err?.message || 'Could not update cron');
+      await load(true);
+    } catch {
+      setNotice('Could not start the AI right now.');
     } finally {
       setCronBusy(false);
+    }
+  };
+
+  const runDryRun = async () => {
+    if (blockers.length) {
+      setNotice(blockers[0]);
+      return;
+    }
+    setNotice(null);
+    try {
+      setDryBusy(true);
+      const res = await authenticatedFetch('/api/auth/runs/dry-run', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ managerId: selectedId })
+      });
+      const json = await res.json();
+      if (!res.ok || !json.success) {
+        setNotice('Connect a social account and try the dry run again.');
+        return;
+      }
+      await load(true);
+      setNotice('Dry run drafted a post. Open it in the run feed to publish.');
+    } catch {
+      setNotice('Could not complete the dry run. Try again.');
+    } finally {
+      setDryBusy(false);
+    }
+  };
+
+  const resolveRun = async (id: string, approve: boolean) => {
+    if (busyRunId) return;
+    setBusyRunId(id);
+    setNotice(approve ? 'Publishing…' : 'Updating…');
+    if (approve) {
+      setPreviewRun((prev) => (prev && prev.id === id ? { ...prev, status: 'publishing' } : prev));
+      setRuns((prev) => prev.map((item) => (item.id === id ? { ...item, status: 'publishing' } : item)));
+    }
+    try {
+      const res = await authenticatedFetch(`/api/auth/runs/${id}/${approve ? 'approve' : 'reject'}`, { method: 'POST' });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        setNotice(approve ? 'Could not publish that post.' : 'Could not update that run.');
+        return;
+      }
+      setPreviewRun(null);
+      await load(true);
+      setNotice(approve ? 'Posted.' : 'Draft discarded.');
+    } catch {
+      setNotice('Could not update that run.');
+    } finally {
+      setBusyRunId(null);
+    }
+  };
+
+  const stopRun = async (run: AgentRunItem) => {
+    if (busyRunId) return;
+    setBusyRunId(run.id);
+    try {
+      const res = await authenticatedFetch(`/api/auth/runs/${run.id}/stop`, { method: 'POST' });
+      if (!res.ok) {
+        setNotice('Could not stop that run.');
+        return;
+      }
+      setPreviewRun(null);
+      await load(true);
+      setNotice('Run stopped.');
+    } finally {
+      setBusyRunId(null);
+    }
+  };
+
+  const restartRun = async (run: AgentRunItem) => {
+    if (busyRunId) return;
+    setBusyRunId(run.id);
+    try {
+      const res = await authenticatedFetch(`/api/auth/runs/${run.id}/restart`, { method: 'POST' });
+      if (!res.ok) {
+        setNotice('Could not restart that run.');
+        return;
+      }
+      await load(true);
+      setNotice('Run restarted. Open the draft to publish.');
+    } finally {
+      setBusyRunId(null);
+    }
+  };
+
+  const regenerateDraft = async (run: AgentRunItem) => {
+    if (busyRunId) return;
+    setBusyRunId(run.id);
+    setNotice('Writing a new draft…');
+    try {
+      const res = await authenticatedFetch(`/api/auth/runs/${run.id}/regenerate`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ managerId: selectedId })
+      });
+      const json = await res.json().catch(() => ({}));
+      if (!res.ok || !json.success) {
+        setNotice('Could not regenerate that draft.');
+        return;
+      }
+      const next = { ...run, draft: json.data.draft, platforms: json.data.platforms };
+      setPreviewRun(next);
+      setRuns((prev) => prev.map((item) => (item.id === run.id ? { ...item, ...next } : item)));
+      setNotice('New draft ready.');
+    } catch {
+      setNotice('Could not regenerate that draft.');
+    } finally {
+      setBusyRunId(null);
     }
   };
 
@@ -155,70 +278,78 @@ export const AgentRunsView: React.FC = () => {
           </div>
           <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight drop-shadow">Agent Runs</h1>
           <p className="text-xs sm:text-sm text-white/70 mt-1">
-            Start or stop the hired AI cron and watch posting activity here.
+            Choose a hired AI, start a dry run or the schedule, then manage each run in the feed.
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <span className={`px-3 py-1.5 rounded-full border text-xs backdrop-blur-md ${
-            cron?.running ? 'bg-white/15 border-white/30 text-white' : 'bg-black/30 border-white/15 text-white/70'
-          }`}>
-            <span className={`inline-block w-2 h-2 rounded-full mr-2 ${cron?.running ? 'bg-white animate-pulse' : 'bg-white/40'}`} />
-            {cron?.running ? `${cron.managerName || 'AI'} running` : 'Cron idle'}
-          </span>
-        </div>
+        <span className={`px-3 py-1.5 rounded-full border text-xs backdrop-blur-md ${
+          cron?.running ? 'bg-white/15 border-white/30 text-white' : 'bg-black/30 border-white/15 text-white/70'
+        }`}>
+          <span className={`inline-block w-2 h-2 rounded-full mr-2 ${cron?.running ? 'bg-white animate-pulse' : 'bg-white/40'}`} />
+          {cron?.running ? `${cron.managerName || 'AI'} scheduled` : 'Schedule idle'}
+        </span>
       </div>
 
       <div className="p-4 sm:p-6 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl space-y-4">
-        <div className="grid grid-cols-1 lg:grid-cols-12 gap-4">
-          <div className="lg:col-span-7 space-y-3">
-            <label className="block text-xs font-semibold text-white/80 uppercase tracking-wider">Hired AI to run</label>
-            {managers.length ? (
-              <GlassSelect
-                options={managers.map((item) => ({
-                  value: item.id,
-                  label: `${item.name} — ${item.role}${item.isActive ? ' (active)' : ''}`
-                }))}
-                value={selectedId}
-                onChange={setSelectedId}
-              />
-            ) : (
-              <p className="text-xs text-white/60">No AI hired yet. Go to Hire Your AI, save a job, then start the cron here.</p>
-            )}
-            {selected && (
-              <p className="text-[11px] text-white/55">
-                Brand: {selected.brandName || 'not linked'} · Posts to: {(selected.postTo || []).join(', ') || 'none'} · {selected.postingFrequency || 'no schedule'}
-              </p>
-            )}
-            {blockers.length > 0 && (
-              <ul className="text-[11px] text-white/70 space-y-1 list-disc pl-4">
-                {blockers.map((item) => (
-                  <li key={item}>{item}</li>
-                ))}
-              </ul>
-            )}
+        <label className="block text-xs font-semibold text-white/80 uppercase tracking-wider">Hired AI to run</label>
+        {managers.length ? (
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            {managers.map((item) => {
+              const active = item.id === selectedId;
+              return (
+                <button
+                  key={item.id}
+                  type="button"
+                  onClick={() => pickManager(item.id)}
+                  className={`text-left px-3.5 py-3 rounded-xl border backdrop-blur-md transition-all ${
+                    active
+                      ? 'bg-white/20 border-white/35 text-white'
+                      : 'bg-white/10 border-white/15 text-white/80 hover:bg-white/15'
+                  }`}
+                >
+                  <div className="text-sm font-semibold">{item.name}</div>
+                  <div className="text-[11px] text-white/60 mt-0.5">
+                    {item.role}{item.isActive ? ' · active' : ''}
+                  </div>
+                </button>
+              );
+            })}
           </div>
-          <div className="lg:col-span-5 flex flex-wrap items-end gap-2">
-            <button
-              type="button"
-              disabled={cronBusy || !canStart || cron?.running}
-              onClick={() => toggleCron(true)}
-              className="px-4 py-2.5 rounded-xl bg-white text-black text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"
-            >
-              <Play className="w-3.5 h-3.5" />
-              {cronBusy && !cron?.running ? 'Starting…' : 'Start AI'}
-            </button>
-            <button
-              type="button"
-              disabled={cronBusy || !cron?.running}
-              onClick={() => toggleCron(false)}
-              className="px-4 py-2.5 rounded-xl bg-white/10 border border-white/20 text-white text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"
-            >
-              <Square className="w-3.5 h-3.5" />
-              {cronBusy && cron?.running ? 'Stopping…' : 'Stop AI'}
-            </button>
-          </div>
+        ) : (
+          <p className="text-xs text-white/60">No AI hired yet. Go to Hire Your AI, save a job, then start here.</p>
+        )}
+        {selected && (
+          <p className="text-[11px] text-white/55">
+            Brand: {selected.brandName || 'not linked'} · Posts to: {(selected.postTo || []).join(', ') || 'none'} · {selected.postingFrequency || 'no schedule'}
+          </p>
+        )}
+        {blockers.length > 0 && (
+          <ul className="text-[11px] text-white/70 space-y-1 list-disc pl-4">
+            {blockers.map((item) => (
+              <li key={item}>{item}</li>
+            ))}
+          </ul>
+        )}
+        <div className="flex flex-wrap gap-2">
+          <button
+            type="button"
+            disabled={dryBusy || !canStart}
+            onClick={() => void runDryRun()}
+            className="px-4 py-2.5 rounded-xl bg-white text-black text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <Sparkles className="w-3.5 h-3.5" />
+            {dryBusy ? 'Drafting…' : 'Dry run'}
+          </button>
+          <button
+            type="button"
+            disabled={cronBusy || !canStart || cron?.running}
+            onClick={() => void startCron()}
+            className="px-4 py-2.5 rounded-xl bg-white text-black text-xs font-semibold flex items-center gap-1.5 disabled:opacity-40"
+          >
+            <Play className="w-3.5 h-3.5" />
+            {cronBusy ? 'Starting…' : 'Start AI'}
+          </button>
         </div>
-        {error && <p className="text-xs text-red-300">{error}</p>}
+        {notice && <p className="text-xs text-white/70">{notice}</p>}
       </div>
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
@@ -249,39 +380,84 @@ export const AgentRunsView: React.FC = () => {
             />
           </div>
         </div>
-        <div className="overflow-x-auto">
-          <table className="w-full text-left text-xs text-white/90 min-w-[640px]">
-            <thead>
-              <tr className="border-b border-white/15 text-white/60 text-[10px] uppercase tracking-wider">
-                <th className="py-2.5 px-2">Run</th>
-                <th className="py-2.5 px-2">Agent</th>
-                <th className="py-2.5 px-2">Status</th>
-                <th className="py-2.5 px-2">Tokens</th>
-                <th className="py-2.5 px-2">Cost</th>
-                <th className="py-2.5 px-2">Started</th>
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-white/10">
-              {filteredRuns.length ? filteredRuns.map((run) => (
-                <tr key={run.id} className="hover:bg-white/10">
-                  <td className="py-3 px-2 font-mono text-[11px]">{run.runId}</td>
-                  <td className="py-3 px-2">{run.agentName}</td>
-                  <td className="py-3 px-2 capitalize text-white/80">{run.status}</td>
-                  <td className="py-3 px-2 font-mono">{run.tokens}</td>
-                  <td className="py-3 px-2 font-mono">{run.cost}</td>
-                  <td className="py-3 px-2 text-white/60">{run.started}</td>
-                </tr>
-              )) : (
-                <tr>
-                  <td colSpan={6} className="py-8 text-center text-white/50">
-                    {loading ? 'Loading…' : 'No runs yet. Start an employed AI to begin the cron.'}
-                  </td>
-                </tr>
-              )}
-            </tbody>
-          </table>
+
+        <div className="space-y-3">
+          {filteredRuns.length ? filteredRuns.map((run) => {
+            const live = run.status === 'awaiting' || run.status === 'publishing';
+            return (
+              <div key={run.id} className="rounded-xl bg-black/30 border border-white/15 p-4 space-y-3">
+                <div className="flex flex-wrap items-start justify-between gap-3">
+                  <div>
+                    <div className="text-sm font-semibold text-white">{run.agentName}</div>
+                    <div className="text-[11px] text-white/50 font-mono mt-0.5">{run.runId} · {run.status} · {formatRunTime(run.createdAt, run.started)}</div>
+                  </div>
+                  <div className="flex flex-wrap gap-1.5">
+                    {run.draft && (
+                      <button type="button" onClick={() => setPreviewRun(run)} className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/20 text-[11px] text-white">
+                        View draft
+                      </button>
+                    )}
+                    {run.status === 'awaiting' && run.draft && (
+                      <button type="button" disabled={Boolean(busyRunId)} onClick={() => void resolveRun(run.id, true)} className="px-2.5 py-1 rounded-lg bg-white text-black text-[11px] font-semibold disabled:opacity-40">
+                        <Check className="w-3 h-3 inline mr-1" />Publish
+                      </button>
+                    )}
+                    {live && (
+                      <button type="button" disabled={Boolean(busyRunId)} onClick={() => void stopRun(run)} className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/20 text-[11px] text-white disabled:opacity-40">
+                        <Square className="w-3 h-3 inline mr-1" />Stop
+                      </button>
+                    )}
+                    {!live && (
+                      <button type="button" disabled={Boolean(busyRunId)} onClick={() => void restartRun(run)} className="px-2.5 py-1 rounded-lg bg-white/10 border border-white/20 text-[11px] text-white disabled:opacity-40">
+                        <RotateCcw className="w-3 h-3 inline mr-1" />Restart
+                      </button>
+                    )}
+                  </div>
+                </div>
+              </div>
+            );
+          }) : (
+            <p className="py-8 text-center text-white/50 text-xs">
+              {loading ? 'Loading…' : 'No runs yet. Start a dry run or Start AI.'}
+            </p>
+          )}
         </div>
       </div>
+
+      {previewRun?.draft && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
+          <div className="w-full max-w-lg rounded-2xl bg-white/10 border border-white/20 backdrop-blur-xl shadow-2xl p-5 space-y-4">
+            <div className="flex items-start justify-between gap-3">
+              <div>
+                <h2 className="text-base font-semibold text-white">Draft post</h2>
+                <p className="text-[11px] text-white/55 mt-1">
+                  {previewRun.agentName}
+                  {previewRun.platforms?.length ? ` · ${(previewRun.platforms || []).join(', ')}` : ''}
+                </p>
+              </div>
+              <button type="button" onClick={() => setPreviewRun(null)} className="p-1.5 rounded-lg text-white/60 hover:text-white hover:bg-white/10" aria-label="Close">
+                <X className="w-4 h-4" />
+              </button>
+            </div>
+            <div className="max-h-[50vh] overflow-y-auto rounded-xl bg-black/40 border border-white/15 p-4">
+              <p className="text-sm text-white whitespace-pre-wrap leading-relaxed">{previewRun.draft}</p>
+            </div>
+            {previewRun.status === 'awaiting' && (
+              <div className="flex flex-wrap justify-end gap-2">
+                <button type="button" disabled={Boolean(busyRunId)} onClick={() => void regenerateDraft(previewRun)} className="px-3.5 py-1.5 rounded-xl bg-white/10 border border-white/20 text-xs text-white disabled:opacity-40">
+                  Regenerate
+                </button>
+                <button type="button" disabled={Boolean(busyRunId)} onClick={() => void stopRun(previewRun)} className="px-3.5 py-1.5 rounded-xl bg-white/10 border border-white/20 text-xs text-white disabled:opacity-40">
+                  Stop
+                </button>
+                <button type="button" disabled={Boolean(busyRunId)} onClick={() => void resolveRun(previewRun.id, true)} className="px-3.5 py-1.5 rounded-xl bg-white text-black text-xs font-semibold disabled:opacity-40">
+                  {busyRunId === previewRun.id ? 'Publishing…' : 'Publish'}
+                </button>
+              </div>
+            )}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

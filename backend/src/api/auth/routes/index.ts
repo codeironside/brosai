@@ -211,6 +211,29 @@ router.delete('/social-accounts/:platform', authenticateToken, async (req: Reque
   }
 });
 
+router.post('/social-accounts/select-page', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const pageId = String(req.body?.pageId || '').trim();
+    if (!pageId) {
+      res.status(400).json({ success: false, error: 'pageId is required' });
+      return;
+    }
+    const accounts = await socialAdapterService.selectFacebookPage(
+      userId,
+      pageId,
+      String(req.body?.state || '').trim() || undefined
+    );
+    res.json({ success: true, data: accounts });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 router.get('/ai-manager', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -969,14 +992,15 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
       const result = await brandMemoryService.generateWithMemory(userId, message, history, {
         threadId: thread.id,
         managerId: String(req.body?.managerId || '').trim() || undefined,
-        brandId: String(req.body?.brandId || '').trim() || undefined
+        brandId: String(req.body?.brandId || '').trim() || undefined,
+        channel
       });
       reply = result.reply;
       usedWeb = Boolean(result.usedWeb);
       sources = result.sources || [];
     } catch (err: any) {
       logger.error(`Ask AI generation failed: ${err.message}`);
-      reply = err?.message || 'Ask AI failed';
+      reply = 'I could not finish that just now. Please try again.';
     }
 
     const latest = await loadChannelThreads(userId, channel);
@@ -1036,7 +1060,9 @@ router.post('/ai-cron/start', authenticateToken, async (req: Request, res: Respo
     const cron = await agentCronService.start(userId, req.body?.managerId);
     res.json({ success: true, message: 'AI cron started', data: cron });
   } catch (err: any) {
-    res.status(400).json({ success: false, error: err.message });
+    logger.error(`AI cron start failed: ${err.message}`);
+    const known = /Hire an AI|Save at least|Link this AI|Connect at least|Choose where|posting destinations/.test(err.message || '');
+    res.status(400).json({ success: false, error: known ? err.message : 'Could not start the AI right now.' });
   }
 });
 
@@ -1069,6 +1095,53 @@ router.get('/ai-cron', authenticateToken, async (req: Request, res: Response): P
 });
 
 // Create New Real Agent Run in MongoDB
+router.post('/runs/dry-run', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const dbUser = await UserModel.findById(userId);
+    if (!dbUser) {
+      res.status(404).json({ success: false, error: 'Could not start a dry run' });
+      return;
+    }
+    const managerId = String(req.body?.managerId || '').trim();
+    const draft = await brandMemoryService.generateDryRunPost(userId, managerId);
+    const newRun = {
+      id: `run_${Date.now()}`,
+      runId: `dry_${Math.random().toString(36).slice(2, 8)}`,
+      agentName: draft.managerName,
+      status: 'awaiting',
+      toolsCount: 1,
+      latencyPercent: 40,
+      tokens: '—',
+      cost: '$0.00',
+      approvalMode: 'manual',
+      approved: false,
+      createdAt: new Date(),
+      draft: draft.text,
+      platforms: draft.platforms,
+      note: 'Dry run — approve to publish',
+      traces: [{ at: new Date(), label: 'Draft created' }],
+      analytics: { impressions: 0, likes: 0, comments: 0, shares: 0 }
+    };
+    await UserModel.updateOne(
+      { _id: userId },
+      { $push: { agentRuns: { $each: [newRun], $position: 0, $slice: 80 } } }
+    );
+    res.json({ success: true, data: newRun });
+  } catch (err: any) {
+    logger.error(`Dry run failed: ${err.message}`);
+    const known = /Hire an AI|Save at least|Link this AI|Connect at least|Choose where|posting destinations/.test(err.message || '');
+    res.status(400).json({
+      success: false,
+      error: known ? err.message : 'Could not complete the dry run. Try again.'
+    });
+  }
+});
+
 router.post('/runs', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const { agentName, toolsCount = 1, approvalMode = 'manual' } = req.body;
@@ -1087,7 +1160,6 @@ router.post('/runs', authenticateToken, async (req: Request, res: Response): Pro
       latencyPercent: 50,
       tokens: '1.2k',
       cost: '$0.005',
-      started: 'Just now',
       approvalMode: approvalMode || 'manual',
       createdAt: new Date()
     };
@@ -1130,6 +1202,34 @@ router.get('/dashboard-stats', authenticateToken, async (req: Request, res: Resp
       { time: '18:00', completion: Math.min(totalRuns * 40, 300), cacheWrite: 100, prompt: 150, toolTokens: 2.5 }
     ] : [];
 
+    const emptyAnalytics = { impressions: 0, likes: 0, comments: 0, shares: 0 };
+    const addAnalytics = (left: typeof emptyAnalytics, right: any) => ({
+      impressions: left.impressions + Number(right?.impressions || 0),
+      likes: left.likes + Number(right?.likes || 0),
+      comments: left.comments + Number(right?.comments || 0),
+      shares: left.shares + Number(right?.shares || 0)
+    });
+    const totalAnalytics = userRuns.reduce((sum: typeof emptyAnalytics, run: any) => addAnalytics(sum, run.analytics), { ...emptyAnalytics });
+    const platformLabels: Record<string, string> = {
+      linkedin: 'LinkedIn',
+      twitter: 'X',
+      facebook: 'Facebook Page',
+      threads: 'Threads'
+    };
+    const perAccountMap: Record<string, typeof emptyAnalytics & { posts: number; label: string; platform: string }> = {};
+    userRuns.forEach((run: any) => {
+      const platforms = Array.isArray(run.platforms) && run.platforms.length ? run.platforms : [];
+      platforms.forEach((platform: string) => {
+        if (!perAccountMap[platform]) {
+          perAccountMap[platform] = { platform, label: platformLabels[platform] || platform, posts: 0, ...emptyAnalytics };
+        }
+        perAccountMap[platform].posts += 1;
+        const next = addAnalytics(perAccountMap[platform], run.analytics);
+        perAccountMap[platform] = { ...perAccountMap[platform], ...next };
+      });
+    });
+    const perAccountAnalytics = Object.values(perAccountMap);
+
     const dynamicStats = {
       totalRuns,
       totalRunsDelta: totalRuns > 0 ? `+${totalRuns} total runs` : 'No runs logged yet',
@@ -1145,7 +1245,13 @@ router.get('/dashboard-stats', authenticateToken, async (req: Request, res: Resp
       managers: listManagers(dbUser),
       brands: listBrandBrains(dbUser).map((item: any) => ({ id: item.id, brandName: item.brandName })),
       connectedPlatforms: connectedPlatforms(dbUser),
-      runs: userRuns.map((r: any) => ({
+      socialAccounts: listPublicAccounts(dbUser?.socialAccounts || []),
+      totalAnalytics,
+      perAccountAnalytics,
+      runs: userRuns.map((r: any) => {
+        const inferred = Number(String(r.id || '').replace(/^run_/, ''));
+        const createdAt = r.createdAt || (Number.isFinite(inferred) && inferred > 1e12 ? new Date(inferred) : null);
+        return {
         id: r.id || r._id.toString(),
         runId: r.runId,
         agentName: r.agentName,
@@ -1154,50 +1260,186 @@ router.get('/dashboard-stats', authenticateToken, async (req: Request, res: Resp
         latencyPercent: r.latencyPercent,
         tokens: r.tokens,
         cost: r.cost,
-        started: r.started || 'Recent',
+        createdAt,
+        started: createdAt || r.started || null,
         approvalMode: r.approvalMode,
-        approved: r.approved
-      }))
+        approved: r.approved,
+        draft: r.draft || '',
+        platforms: r.platforms || [],
+        note: r.note || '',
+        traces: Array.isArray(r.traces) ? r.traces : [],
+        analytics: r.analytics || { impressions: 0, likes: 0, comments: 0, shares: 0 }
+      };
+      })
     };
 
     res.json({ success: true, data: dynamicStats });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    logger.error(`Dashboard stats failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Could not load dashboard stats.' });
   }
 });
 
 // Dynamic Agent Run Approval & Rejection Endpoints in MongoDB
 router.post('/runs/:id/approve', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
-    const dbUser = await UserModel.findById(req.user?.id);
-    if (dbUser && dbUser.agentRuns) {
-      const run = dbUser.agentRuns.find((r: any) => r.id === req.params.id || r.runId === req.params.id);
-      if (run) {
-        run.status = 'succeeded';
-        run.approved = true;
-        await dbUser.save();
-      }
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
     }
-    res.json({ success: true, message: `Run ${req.params.id} approved in MongoDB`, status: 'succeeded' });
+    const id = String(req.params.id || '');
+    const claimed = await UserModel.findOneAndUpdate(
+      {
+        _id: userId,
+        agentRuns: { $elemMatch: { $or: [{ id }, { runId: id }], status: 'awaiting' } }
+      },
+      { $set: { 'agentRuns.$.status': 'publishing' } },
+      { new: true }
+    );
+
+    if (!claimed) {
+      const dbUser = await UserModel.findById(userId);
+      const existing = (dbUser?.agentRuns || []).find((r: any) => r.id === id || r.runId === id);
+      if (existing && (existing.status === 'succeeded' || existing.status === 'publishing')) {
+        res.json({ success: true, status: 'succeeded', already: true });
+        return;
+      }
+      res.status(400).json({ success: false, error: 'Could not publish that post.' });
+      return;
+    }
+
+    const run = (claimed.agentRuns || []).find((r: any) => r.id === id || r.runId === id);
+    let traces: Array<{ at: Date; label: string }> = [{ at: new Date(), label: 'Publishing started' }];
+    if (run?.draft && Array.isArray(run.platforms) && run.platforms.length) {
+      const { publishSocialPost } = await import('../../social/services/socialPublishService.js');
+      const summary = await publishSocialPost(userId, String(run.draft), run.platforms);
+      traces = traces.concat(
+        String(summary).split('\n').filter(Boolean).map((label) => ({ at: new Date(), label }))
+      );
+    }
+    traces.push({ at: new Date(), label: 'Finished' });
+
+    const latest = await UserModel.findById(userId);
+    const live = (latest?.agentRuns || []).find((r: any) => r.id === id || r.runId === id);
+    if (live?.note === 'Stopped' || live?.status === 'failed') {
+      res.json({ success: true, status: 'failed', stopped: true });
+      return;
+    }
+
+    await UserModel.updateOne(
+      { _id: userId, agentRuns: { $elemMatch: { $or: [{ id }, { runId: id }] } } },
+      {
+        $set: {
+          'agentRuns.$.status': 'succeeded',
+          'agentRuns.$.approved': true,
+          'agentRuns.$.analytics': { impressions: 0, likes: 0, comments: 0, shares: 0 }
+        },
+        $push: { 'agentRuns.$.traces': { $each: traces } }
+      }
+    );
+    res.json({ success: true, status: 'succeeded' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    logger.error(`Run approve failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Could not publish that post.' });
+  }
+});
+
+router.post('/runs/:id/regenerate', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const id = String(req.params.id || '');
+    const dbUser = await UserModel.findById(userId);
+    const run = (dbUser?.agentRuns || []).find((r: any) => r.id === id || r.runId === id);
+    if (!run || run.status !== 'awaiting') {
+      res.status(400).json({ success: false, error: 'Could not regenerate that draft.' });
+      return;
+    }
+    const draft = await brandMemoryService.generateDryRunPost(userId, String(req.body?.managerId || '').trim());
+    await UserModel.updateOne(
+      { _id: userId, agentRuns: { $elemMatch: { $or: [{ id }, { runId: id }], status: 'awaiting' } } },
+      { $set: { 'agentRuns.$.draft': draft.text, 'agentRuns.$.platforms': draft.platforms } }
+    );
+    res.json({
+      success: true,
+      data: {
+        id: run.id,
+        runId: run.runId,
+        draft: draft.text,
+        platforms: draft.platforms,
+        status: 'awaiting'
+      }
+    });
+  } catch (err: any) {
+    logger.error(`Draft regenerate failed: ${err.message}`);
+    res.status(400).json({ success: false, error: 'Could not regenerate that draft.' });
   }
 });
 
 router.post('/runs/:id/reject', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
-    const dbUser = await UserModel.findById(req.user?.id);
-    if (dbUser && dbUser.agentRuns) {
-      const run = dbUser.agentRuns.find((r: any) => r.id === req.params.id || r.runId === req.params.id);
-      if (run) {
-        run.status = 'failed';
-        run.approved = false;
-        await dbUser.save();
-      }
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
     }
-    res.json({ success: true, message: `Run ${req.params.id} rejected in MongoDB`, status: 'failed' });
+    const id = String(req.params.id || '');
+    await UserModel.updateOne(
+      { _id: userId, agentRuns: { $elemMatch: { $or: [{ id }, { runId: id }] } } },
+      { $set: { 'agentRuns.$.status': 'failed', 'agentRuns.$.approved': false } }
+    );
+    res.json({ success: true, status: 'failed' });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    logger.error(`Run reject failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Could not update that run.' });
+  }
+});
+
+router.post('/runs/:id/stop', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const id = String(req.params.id || '');
+    await UserModel.updateOne(
+      { _id: userId, agentRuns: { $elemMatch: { $or: [{ id }, { runId: id }] } } },
+      {
+        $set: { 'agentRuns.$.status': 'failed', 'agentRuns.$.note': 'Stopped', 'agentRuns.$.approved': false },
+        $push: { 'agentRuns.$.traces': { at: new Date(), label: 'Stopped' } }
+      }
+    );
+    res.json({ success: true, status: 'failed' });
+  } catch (err: any) {
+    logger.error(`Run stop failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Could not stop that run.' });
+  }
+});
+
+router.post('/runs/:id/restart', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const id = String(req.params.id || '');
+    await UserModel.updateOne(
+      { _id: userId, agentRuns: { $elemMatch: { $or: [{ id }, { runId: id }] } } },
+      {
+        $set: { 'agentRuns.$.status': 'awaiting', 'agentRuns.$.note': 'Restarted — publish when ready', 'agentRuns.$.approved': false },
+        $push: { 'agentRuns.$.traces': { at: new Date(), label: 'Restarted' } }
+      }
+    );
+    res.json({ success: true, status: 'awaiting' });
+  } catch (err: any) {
+    logger.error(`Run restart failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Could not restart that run.' });
   }
 });
 

@@ -10,4 +10,6 @@ backend/.env*
 backend/build
 backend/dist
 frontend/dist
+*firebase-adminsdk*.json
+**/serviceAccount*.json
 .DS_Store
