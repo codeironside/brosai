@@ -23,9 +23,6 @@ chown -R brosai:brosai "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist" "$APP_DI
 chmod 640 "$APP_DIR/backend/.env.production" 2>/dev/null || true
 chown root:brosai "$APP_DIR/backend/.env.production" 2>/dev/null || true
 
-if [[ -f "$APP_DIR/deploy/Caddyfile" ]]; then
-  install -m 644 "$APP_DIR/deploy/Caddyfile" /etc/caddy/Caddyfile
-fi
 if [[ -f "$APP_DIR/deploy/brosai-api.service" ]]; then
   install -m 644 "$APP_DIR/deploy/brosai-api.service" /etc/systemd/system/brosai-api.service
   systemctl daemon-reload
@@ -34,8 +31,8 @@ fi
 sudo -u brosai bash -lc "cd $APP_DIR/backend && npm ci --omit=dev"
 
 systemctl restart brosai-api
-caddy validate --config /etc/caddy/Caddyfile
-systemctl reload caddy
+nginx -t
+systemctl reload nginx
 
 for i in 1 2 3 4 5 6 7 8 9 10; do
   if curl -fsS http://127.0.0.1:5000/health >/dev/null; then

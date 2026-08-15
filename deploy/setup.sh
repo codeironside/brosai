@@ -7,12 +7,12 @@ set -euo pipefail
 # Optional env:
 #   ADMIN_SSH_PUBKEY   full public key line for the sudo admin user
 #   DEPLOY_SSH_PUBKEY  full public key line for GitHub Actions
-#   CADDY_EMAIL        Let's Encrypt contact (default admin@vamvamvamai.com)
+#   CERTBOT_EMAIL      Let's Encrypt contact (default admin@vamvamvamai.com)
 #   REPO_URL           git clone URL
 
 APP_DIR=/opt/brosai
 REPO_URL="${REPO_URL:-https://github.com/codeironside/brosai.git}"
-CADDY_EMAIL="${CADDY_EMAIL:-admin@vamvamvamai.com}"
+CERTBOT_EMAIL="${CERTBOT_EMAIL:-admin@vamvamvamai.com}"
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 
 if [[ "$(id -u)" -ne 0 ]]; then
@@ -29,11 +29,9 @@ if ! command -v node >/dev/null 2>&1; then
   apt-get install -y nodejs
 fi
 
-if ! command -v caddy >/dev/null 2>&1; then
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/gpg.key' | gpg --dearmor -o /usr/share/keyrings/caddy-stable-archive-keyring.gpg
-  curl -1sLf 'https://dl.cloudsmith.io/public/caddy/stable/debian.deb.txt' | tee /etc/apt/sources.list.d/caddy-stable.list >/dev/null
-  apt-get update -y
-  apt-get install -y caddy
+apt-get install -y nginx certbot python3-certbot-nginx
+if systemctl list-unit-files | grep -q '^caddy.service'; then
+  systemctl disable --now caddy || true
 fi
 
 id -u brosai >/dev/null 2>&1 || useradd --system --home "$APP_DIR" --shell /usr/sbin/nologin brosai
@@ -87,8 +85,8 @@ install -m 755 "$APP_DIR/deploy/brosai-rollback" /usr/local/bin/brosai-rollback
 install -m 440 "$APP_DIR/deploy/sudoers-deploy" /etc/sudoers.d/brosai-deploy
 visudo -cf /etc/sudoers.d/brosai-deploy
 
-sed "s/admin@vamvamvamai.com/${CADDY_EMAIL}/" "$APP_DIR/deploy/Caddyfile" > /etc/caddy/Caddyfile
 install -m 644 "$APP_DIR/deploy/brosai-api.service" /etc/systemd/system/brosai-api.service
+CERTBOT_EMAIL="$CERTBOT_EMAIL" SKIP_CERTBOT="${SKIP_CERTBOT:-0}" bash "$APP_DIR/deploy/install-nginx.sh"
 
 ufw allow OpenSSH
 ufw allow 80/tcp
@@ -104,12 +102,7 @@ else
   systemctl enable --now brosai-api
 fi
 
-systemctl enable --now caddy
-caddy validate --config /etc/caddy/Caddyfile || true
-systemctl reload caddy || true
-
 echo
-echo "App bootstrap done."
+echo "App bootstrap done (nginx + Node API)."
 echo "Next: edit $APP_DIR/backend/.env.production, then: systemctl enable --now brosai-api"
 echo "Then run: sudo bash $APP_DIR/deploy/harden.sh"
-echo "Put ADMIN_SSH_PUBKEY and DEPLOY_SSH_PUBKEY in place before locking SSH."

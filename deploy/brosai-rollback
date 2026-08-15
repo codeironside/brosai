@@ -19,5 +19,6 @@ cp -a "$APP_DIR/frontend/dist.prev" "$APP_DIR/frontend/dist"
 chown -R brosai:brosai "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist"
 
 systemctl restart brosai-api
-systemctl reload caddy
+nginx -t
+systemctl reload nginx
 echo "Rolled back to previous frontend/backend dist"
