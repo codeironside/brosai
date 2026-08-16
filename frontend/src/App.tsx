@@ -37,6 +37,12 @@ function VamvamvamAIHeroContent() {
     }
   }, [currentPage, isAuthenticated]);
 
+  useEffect(() => {
+    if (isAuthenticated && currentPage === 'signin') {
+      setCurrentPage('dashboard');
+    }
+  }, [isAuthenticated, currentPage]);
+
   // Lock body scroll when mobile menu is open
   useEffect(() => {
     if (isMobileMenuOpen) {
@@ -58,6 +64,7 @@ function VamvamvamAIHeroContent() {
 
   return (
     <div className="relative min-h-screen w-full bg-black text-white font-sans overflow-x-hidden">
+      <GoogleOneTap onSignedIn={() => navigateTo('dashboard')} />
       
       {/* TOP NAVIGATION BAR */}
       <nav className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-5 py-5 sm:px-8 sm:py-6 lg:px-12 bg-gradient-to-b from-black/90 via-black/50 to-transparent backdrop-blur-md">
@@ -421,7 +428,6 @@ function VamvamvamAIHeroContent() {
 export function App() {
   return (
     <AppProvider>
-      <GoogleOneTap />
       <VamvamvamAIHeroContent />
     </AppProvider>
   );
