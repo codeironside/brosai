@@ -1,5 +1,5 @@
-# Copied to /etc/sudoers.d/brosai-deploy
+# Copied to /etc/sudoers.d/brosai-deploy by brosai-release (runs as root).
 deploy ALL=(root) NOPASSWD: /usr/local/bin/brosai-release
 deploy ALL=(root) NOPASSWD: /usr/local/bin/brosai-rollback
-deploy ALL=(root) NOPASSWD: /usr/bin/cp /opt/brosai/deploy/brosai-release /usr/local/bin/brosai-release
-deploy ALL=(root) NOPASSWD: /usr/bin/cp /opt/brosai/deploy/brosai-rollback /usr/local/bin/brosai-rollback
+deploy ALL=(root) NOPASSWD: /usr/bin/bash /home/deploy/brosai-incoming/deploy/brosai-release
+deploy ALL=(root) NOPASSWD: /bin/bash /home/deploy/brosai-incoming/deploy/brosai-release
