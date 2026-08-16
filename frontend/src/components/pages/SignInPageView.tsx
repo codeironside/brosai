@@ -2,7 +2,8 @@ import React, { useState } from 'react';
 import { Shield, CheckCircle2, LogOut } from 'lucide-react';
 import { motion } from 'framer-motion';
 import { HLSVideo } from '../common/HLSVideo';
-import { loginWithGoogleOAuth, logoutFirebase } from '../../config/firebase';
+import { logoutFirebase } from '../../config/firebase';
+import { establishGoogleSession } from '../../utils/googleSession';
 import { useApp } from '../../context/AppContext';
 
 interface SignInPageViewProps {
@@ -17,80 +18,13 @@ export const SignInPageView: React.FC<SignInPageViewProps> = ({ onLoginSuccess }
   const handleGoogleSignIn = async () => {
     setLoading(true);
     setErrorMsg(null);
-
-    const res = await loginWithGoogleOAuth();
-
-    if (res.success && res.user) {
-      const email = res.user.email || 'user@vamvamvam.ai';
-      const name = res.user.displayName || 'Vamvamvam User';
-      const avatarUrl = res.user.photoURL || 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80';
-
-      try {
-        // Sync authentication payload with backend API to save user in MongoDB and receive JWT tokens
-        const backendRes = await fetch('/api/auth/google', {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({ email, name, avatarUrl }),
-        });
-
-        const backendData = await backendRes.json();
-
-        if (backendData.success && backendData.data?.user) {
-          const dbUser = backendData.data.user;
-          const accessToken = backendData.data.accessToken || `acc_tok_${Date.now()}`;
-          const refreshToken = backendData.data.refreshToken || `ref_tok_${Date.now()}`;
-
-          // Save tokens and user session in AppContext and localStorage
-          login(
-            {
-              id: dbUser.id || res.user.uid,
-              name: dbUser.name || name,
-              email: dbUser.email || email,
-              avatarUrl: dbUser.avatarUrl || avatarUrl,
-              role: dbUser.role || 'user', // strictly default to 'user'
-              category: dbUser.category || 'business',
-              organizationName: dbUser.organizationName || 'Vamvamvam Brand Account',
-              authProvider: 'google',
-            },
-            accessToken,
-            refreshToken
-          );
-
-          setLoading(false);
-          // Redirect user seamlessly to Dashboard
-          if (onLoginSuccess) {
-            onLoginSuccess();
-          }
-          return;
-        }
-      } catch (backendErr: any) {
-        console.warn('Backend API connection error, falling back to client authenticated session:', backendErr);
-      }
-
-      // Fallback state update if offline with default 'user' role
-      login(
-        {
-          id: res.user.uid,
-          name: name,
-          email: email,
-          avatarUrl: avatarUrl,
-          role: 'user',
-          authProvider: 'google',
-        },
-        `mock_acc_tok_${Date.now()}`,
-        `mock_ref_tok_${Date.now()}`
-      );
-
-      setLoading(false);
-      if (onLoginSuccess) {
-        onLoginSuccess();
-      }
-    } else {
-      setLoading(false);
-      setErrorMsg(res.error || 'Failed to authenticate with Google OAuth');
+    const result = await establishGoogleSession(login);
+    setLoading(false);
+    if (result.ok) {
+      onLoginSuccess?.();
+      return;
     }
+    setErrorMsg(result.error || 'Failed to authenticate with Google');
   };
 
   const handleSignOut = async () => {
