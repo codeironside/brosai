@@ -20,6 +20,9 @@ if [[ -d "$APP_DIR/frontend/dist" && -n "$(ls -A "$APP_DIR/frontend/dist" 2>/dev
 fi
 
 chown -R brosai:brosai "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist" "$APP_DIR/backend/package.json" "$APP_DIR/backend/package-lock.json"
+if [[ -f "$APP_DIR/backend/.npmrc" ]]; then
+  chown brosai:brosai "$APP_DIR/backend/.npmrc"
+fi
 chmod 640 "$APP_DIR/backend/.env.production" 2>/dev/null || true
 chown root:brosai "$APP_DIR/backend/.env.production" 2>/dev/null || true
 
@@ -28,7 +31,10 @@ if [[ -f "$APP_DIR/deploy/brosai-api.service" ]]; then
   systemctl daemon-reload
 fi
 
-sudo -u brosai bash -lc "cd $APP_DIR/backend && npm ci --omit=dev --legacy-peer-deps"
+sudo -u brosai bash -lc "cd $APP_DIR/backend && npm install --omit=dev --legacy-peer-deps --no-audit --no-fund"
+
+install -m 755 "$APP_DIR/deploy/brosai-release" /usr/local/bin/brosai-release
+install -m 755 "$APP_DIR/deploy/brosai-rollback" /usr/local/bin/brosai-rollback
 
 systemctl restart brosai-api
 nginx -t

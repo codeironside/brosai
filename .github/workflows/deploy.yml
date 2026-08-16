@@ -23,7 +23,7 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
 
       - name: Install and build backend
         working-directory: backend
@@ -98,7 +98,7 @@ jobs:
           RSH="ssh -p ${PORT} -o StrictHostKeyChecking=yes"
           ssh -p "${PORT}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" 'mkdir -p /opt/brosai/backend/dist /opt/brosai/frontend/dist /opt/brosai/deploy'
           rsync -rlz --delete --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" backend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/dist/"
-          rsync -rlz --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" backend/package.json backend/package-lock.json "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/"
+          rsync -rlz --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" backend/package.json backend/package-lock.json backend/.npmrc "${VPS_USER}@${VPS_HOST}:/opt/brosai/backend/"
           rsync -rlz --delete --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" frontend/dist/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/frontend/dist/"
           rsync -rlz --delete --omit-dir-times --no-times --no-perms --no-owner --no-group --chmod=ugo=rwX -e "$RSH" deploy/ "${VPS_USER}@${VPS_HOST}:/opt/brosai/deploy/"
 
@@ -108,7 +108,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
-          ssh -p "${VPS_PORT:-22}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" 'sudo /usr/local/bin/brosai-release'
+          ssh -p "${VPS_PORT:-22}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" 'sudo /usr/bin/cp /opt/brosai/deploy/brosai-release /usr/local/bin/brosai-release; sudo /usr/local/bin/brosai-release'
 
       - name: Verify public HTTPS
         run: |
