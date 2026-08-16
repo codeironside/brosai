@@ -109,21 +109,7 @@ jobs:
           VPS_USER: ${{ secrets.VPS_USER }}
           VPS_PORT: ${{ secrets.VPS_PORT }}
         run: |
-          ssh -p "${VPS_PORT:-22}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" bash -s <<'EOF'
-set -euo pipefail
-if sudo -n /usr/bin/bash /home/deploy/brosai-incoming/deploy/brosai-release; then
-  exit 0
-fi
-if sudo -n /bin/bash /home/deploy/brosai-incoming/deploy/brosai-release; then
-  exit 0
-fi
-if sudo -n /usr/local/bin/brosai-release; then
-  exit 0
-fi
-echo "sudo is not allowed yet. On the VPS run this once as tobi/admin:"
-echo "echo 'deploy ALL=(root) NOPASSWD: /usr/bin/bash /home/deploy/brosai-incoming/deploy/brosai-release' | sudo tee /etc/sudoers.d/brosai-incoming && sudo chmod 440 /etc/sudoers.d/brosai-incoming"
-exit 1
-EOF
+          ssh -p "${VPS_PORT:-22}" -o StrictHostKeyChecking=yes "${VPS_USER}@${VPS_HOST}" "sudo -n /usr/bin/bash /home/deploy/brosai-incoming/deploy/brosai-release || sudo -n /bin/bash /home/deploy/brosai-incoming/deploy/brosai-release || sudo -n /usr/local/bin/brosai-release"
 
       - name: Verify public HTTPS
         run: |
