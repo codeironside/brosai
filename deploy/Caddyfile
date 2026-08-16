@@ -40,11 +40,11 @@ vamvamvamai.com {
 	}
 
 	handle /api/* {
-		reverse_proxy 127.0.0.1:5000
+		reverse_proxy 127.0.0.1:3124
 	}
 
 	handle /health {
-		reverse_proxy 127.0.0.1:5000
+		reverse_proxy 127.0.0.1:3124
 	}
 
 	handle {
@@ -64,5 +64,5 @@ api.vamvamvamai.com {
 		max_size 2MB
 	}
 
-	reverse_proxy 127.0.0.1:5000
+	reverse_proxy 127.0.0.1:3124
 }

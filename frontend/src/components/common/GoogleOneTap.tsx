@@ -22,7 +22,7 @@ function loadGis(): Promise<void> {
   });
 }
 
-export const GoogleOneTap: React.FC = () => {
+export const GoogleOneTap: React.FC<{ onSignedIn?: () => void }> = ({ onSignedIn }) => {
   const { isAuthenticated, login } = useApp();
 
   useEffect(() => {
@@ -70,6 +70,7 @@ export const GoogleOneTap: React.FC = () => {
                   backendData.data.accessToken || `acc_tok_${Date.now()}`,
                   backendData.data.refreshToken || `ref_tok_${Date.now()}`
                 );
+                onSignedIn?.();
               }
             } catch {
               /* ignore; user can use the button */
@@ -87,7 +88,7 @@ export const GoogleOneTap: React.FC = () => {
       cancelled = true;
       window.google?.accounts?.id?.cancel();
     };
-  }, [isAuthenticated, login]);
+  }, [isAuthenticated, login, onSignedIn]);
 
   return null;
 };
