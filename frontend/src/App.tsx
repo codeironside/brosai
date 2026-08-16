@@ -12,22 +12,30 @@ import { AboutPageView } from './components/pages/AboutPageView';
 import { SignInPageView } from './components/pages/SignInPageView';
 import { DashboardPageView } from './components/pages/DashboardPageView';
 import { LegalPageView } from './components/pages/LegalPageView';
+import { NotFoundPageView } from './components/pages/NotFoundPageView';
 import { HLSVideo } from './components/common/HLSVideo';
 import { SquashHamburger } from './components/common/SquashHamburger';
-import { GoogleOneTap } from './components/common/GoogleOneTap';
+import { establishGoogleSession } from './utils/googleSession';
 
-type PageRoute = 'home' | 'modules' | 'clientele' | 'services' | 'about' | 'signin' | 'dashboard' | 'privacy' | 'terms';
+type PageRoute = 'home' | 'modules' | 'clientele' | 'services' | 'about' | 'signin' | 'dashboard' | 'privacy' | 'terms' | 'notfound';
+
+function initialPage(): PageRoute {
+  if (typeof window === 'undefined') return 'home';
+  const path = window.location.pathname.replace(/\/+$/, '') || '/';
+  if (path === '/privacy') return 'privacy';
+  if (path === '/terms') return 'terms';
+  if (path !== '/') return 'notfound';
+  const params = new URLSearchParams(window.location.search);
+  if (params.get('oauth') || sessionStorage.getItem('brosai_return_dashboard') === '1') {
+    return 'dashboard';
+  }
+  return 'home';
+}
 
 function VamvamvamAIHeroContent() {
-  const { isAuthenticated, logout } = useApp();
-  const [currentPage, setCurrentPage] = useState<PageRoute>(() => {
-    if (typeof window === 'undefined') return 'home';
-    const params = new URLSearchParams(window.location.search);
-    if (params.get('oauth') || sessionStorage.getItem('brosai_return_dashboard') === '1') {
-      return 'dashboard';
-    }
-    return 'home';
-  });
+  const { isAuthenticated, logout, login } = useApp();
+  const [currentPage, setCurrentPage] = useState<PageRoute>(initialPage);
+  const [googleLoading, setGoogleLoading] = useState(false);
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
 
   // Protected Dashboard Route Guard: redirect to signin if not authenticated
@@ -60,12 +68,25 @@ function VamvamvamAIHeroContent() {
     setCurrentPage(page);
     setIsMobileMenuOpen(false);
     window.scrollTo({ top: 0, behavior: 'smooth' });
+    if (page === 'home') window.history.pushState({}, '', '/');
+    if (page === 'privacy') window.history.pushState({}, '', '/privacy');
+    if (page === 'terms') window.history.pushState({}, '', '/terms');
+  };
+
+  const continueWithGoogle = async () => {
+    if (isAuthenticated) {
+      navigateTo('dashboard');
+      return;
+    }
+    setGoogleLoading(true);
+    const result = await establishGoogleSession(login);
+    setGoogleLoading(false);
+    if (result.ok) navigateTo('dashboard');
+    else navigateTo('signin');
   };
 
   return (
-    <div className="relative min-h-screen w-full bg-black text-white font-sans overflow-x-hidden">
-      <GoogleOneTap onSignedIn={() => navigateTo('dashboard')} />
-      
+    <div className="relative min-h-screen w-full bg-black text-white font-sans overflow-x-hidden"> 
       {/* TOP NAVIGATION BAR */}
       <nav className="fixed top-0 left-0 right-0 z-40 flex items-center justify-between px-5 py-5 sm:px-8 sm:py-6 lg:px-12 bg-gradient-to-b from-black/90 via-black/50 to-transparent backdrop-blur-md">
         
@@ -151,12 +172,12 @@ function VamvamvamAIHeroContent() {
                 logout();
                 navigateTo('home');
               } else {
-                navigateTo('signin');
+                void continueWithGoogle();
               }
             }}
             className="rounded-full px-5 py-2.5 text-sm font-medium text-white btn-cta-gradient flex items-center justify-center transition-all hover:opacity-90 shadow-lg"
           >
-            {isAuthenticated ? 'Sign out' : 'Continue with Google'}
+            {isAuthenticated ? 'Sign out' : googleLoading ? 'Opening Google…' : 'Continue with Google'}
           </motion.button>
         </div>
 
@@ -226,12 +247,12 @@ function VamvamvamAIHeroContent() {
                       logout();
                       navigateTo('home');
                     } else {
-                      navigateTo('signin');
+                      void continueWithGoogle();
                     }
                   }}
                   className="w-full rounded-full py-3.5 text-base font-medium text-white btn-cta-gradient text-center shadow-lg"
                 >
-                  {isAuthenticated ? 'Sign out' : 'Continue with Google'}
+                  {isAuthenticated ? 'Sign out' : googleLoading ? 'Opening Google…' : 'Continue with Google'}
                 </motion.button>
               </div>
             </motion.div>
@@ -301,10 +322,13 @@ function VamvamvamAIHeroContent() {
                     <motion.button
                       whileHover={{ scale: 1.04 }}
                       whileTap={{ scale: 0.96 }}
-                      onClick={() => navigateTo(isAuthenticated ? 'dashboard' : 'signin')}
+                      onClick={() => {
+                        if (isAuthenticated) navigateTo('dashboard');
+                        else void continueWithGoogle();
+                      }}
                       className="rounded-full px-7 py-3 text-sm font-semibold text-white btn-cta-gradient shadow-xl flex items-center gap-2 transition-all"
                     >
-                      <span>{isAuthenticated ? 'Open dashboard' : 'Continue with Google'}</span>
+                      <span>{isAuthenticated ? 'Open dashboard' : googleLoading ? 'Opening Google…' : 'Continue with Google'}</span>
                       <ArrowRight className="w-4 h-4" />
                     </motion.button>
                   </motion.div>
@@ -399,6 +423,10 @@ function VamvamvamAIHeroContent() {
           {currentPage === 'privacy' && <LegalPageView kind="privacy" />}
           {currentPage === 'terms' && <LegalPageView kind="terms" />}
 
+          {currentPage === 'notfound' && (
+            <NotFoundPageView onGoHome={() => navigateTo('home')} />
+          )}
+
           {currentPage === 'signin' && (
             <SignInPageView onLoginSuccess={() => navigateTo('dashboard')} />
           )}
@@ -409,7 +437,7 @@ function VamvamvamAIHeroContent() {
         </motion.div>
       </AnimatePresence>
 
-      {!['dashboard', 'signin'].includes(currentPage) && (
+      {!['dashboard', 'signin', 'notfound'].includes(currentPage) && (
         <div className="relative z-30 px-5 sm:px-12 py-4 flex flex-wrap items-center gap-x-5 gap-y-2 text-[11px] text-white/45">
           <span>© 2026 Vamvamvam AI</span>
           <button type="button" onClick={() => navigateTo('privacy')} className="hover:text-white">
