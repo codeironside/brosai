@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+set -euo pipefail
+# Installed at /usr/local/bin/brosai-release — always runs the latest rsynced script.
+INCOMING=/home/deploy/brosai-incoming/deploy/brosai-release
+if [[ ! -f "$INCOMING" ]]; then
+  echo "No incoming release script at $INCOMING"
+  exit 1
+fi
+exec /usr/bin/bash "$INCOMING"

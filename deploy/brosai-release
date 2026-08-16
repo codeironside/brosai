@@ -1,15 +1,32 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Root-only release script invoked by GitHub Actions via: sudo /usr/local/bin/brosai-release
 APP_DIR=/opt/brosai
+INCOMING="${BROS_INCOMING:-/home/deploy/brosai-incoming}"
 
 if [[ "$(id -u)" -ne 0 ]]; then
   echo "brosai-release must run as root"
   exit 1
 fi
 
-install -d -o brosai -g brosai -m 2755 "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist"
+if [[ -f "$INCOMING/deploy/sudoers-deploy" ]]; then
+  visudo -cf "$INCOMING/deploy/sudoers-deploy"
+  install -m 440 "$INCOMING/deploy/sudoers-deploy" /etc/sudoers.d/brosai-deploy
+fi
+if [[ -f "$INCOMING/deploy/brosai-wrapper" ]]; then
+  install -m 755 "$INCOMING/deploy/brosai-wrapper" /usr/local/bin/brosai-release
+fi
+if [[ -f "$INCOMING/deploy/brosai-rollback" ]]; then
+  install -m 755 "$INCOMING/deploy/brosai-rollback" /usr/local/bin/brosai-rollback
+fi
+
+if [[ ! -d "$INCOMING/backend/dist" || ! -d "$INCOMING/frontend/dist" ]]; then
+  echo "Missing incoming build at $INCOMING (rsync to ~/brosai-incoming first)"
+  exit 1
+fi
+
+install -d -o brosai -g brosai -m 2755 "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist" "$APP_DIR/deploy"
+
 if [[ -d "$APP_DIR/backend/dist" && -n "$(ls -A "$APP_DIR/backend/dist" 2>/dev/null || true)" ]]; then
   rm -rf "$APP_DIR/backend/dist.prev"
   cp -a "$APP_DIR/backend/dist" "$APP_DIR/backend/dist.prev"
@@ -19,7 +36,17 @@ if [[ -d "$APP_DIR/frontend/dist" && -n "$(ls -A "$APP_DIR/frontend/dist" 2>/dev
   cp -a "$APP_DIR/frontend/dist" "$APP_DIR/frontend/dist.prev"
 fi
 
-chown -R brosai:brosai "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist" "$APP_DIR/backend/package.json" "$APP_DIR/backend/package-lock.json"
+rsync -a --delete "$INCOMING/backend/dist/" "$APP_DIR/backend/dist/"
+rsync -a --delete "$INCOMING/frontend/dist/" "$APP_DIR/frontend/dist/"
+rsync -a --delete "$INCOMING/deploy/" "$APP_DIR/deploy/"
+install -m 644 "$INCOMING/backend/package.json" "$APP_DIR/backend/package.json"
+install -m 644 "$INCOMING/backend/package-lock.json" "$APP_DIR/backend/package-lock.json"
+if [[ -f "$INCOMING/backend/.npmrc" ]]; then
+  install -m 644 "$INCOMING/backend/.npmrc" "$APP_DIR/backend/.npmrc"
+fi
+
+chown -R brosai:brosai "$APP_DIR/backend/dist" "$APP_DIR/frontend/dist" "$APP_DIR/deploy" \
+  "$APP_DIR/backend/package.json" "$APP_DIR/backend/package-lock.json"
 if [[ -f "$APP_DIR/backend/.npmrc" ]]; then
   chown brosai:brosai "$APP_DIR/backend/.npmrc"
 fi
@@ -32,9 +59,6 @@ if [[ -f "$APP_DIR/deploy/brosai-api.service" ]]; then
 fi
 
 sudo -u brosai bash -lc "cd $APP_DIR/backend && npm install --omit=dev --legacy-peer-deps --no-audit --no-fund"
-
-install -m 755 "$APP_DIR/deploy/brosai-release" /usr/local/bin/brosai-release
-install -m 755 "$APP_DIR/deploy/brosai-rollback" /usr/local/bin/brosai-rollback
 
 systemctl restart brosai-api
 nginx -t
