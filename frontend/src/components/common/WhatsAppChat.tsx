@@ -1,5 +1,5 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { MessageSquarePlus, PanelLeft, Pencil, Pin, PinOff, Send, Trash2 } from 'lucide-react';
+import { Check, Copy, Download, MessageSquarePlus, PanelLeft, Pencil, Pin, PinOff, Send, Trash2 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 
 export interface ChatMessage {
@@ -7,6 +7,9 @@ export interface ChatMessage {
   role: 'user' | 'assistant';
   content: string;
   createdAt?: string;
+  edited?: boolean;
+  images?: Array<{ id: string; mimeType?: string }>;
+  imageNote?: string;
 }
 
 interface ChatThread {
@@ -18,11 +21,15 @@ interface ChatThread {
 }
 
 interface WhatsAppChatProps {
-  channel: 'hire-ai' | 'brand-brain';
+  channel: 'hire-ai' | 'brand-brain' | 'composer';
   title?: string;
   placeholder?: string;
   managerId?: string;
   brandId?: string;
+  emptyHint?: string;
+  copyReplies?: boolean;
+  extraBody?: Record<string, unknown>;
+  className?: string;
 }
 
 function formatTime(value?: string) {
@@ -56,9 +63,10 @@ function renderInline(text: string) {
 }
 
 const ChatMarkdown: React.FC<{ content: string }> = ({ content }) => {
-  const lines = String(content || '').replace(/\r/g, '').split('\n');
+  const text = String(content || '').replace(/\r/g, '');
   const blocks: React.ReactNode[] = [];
   let bullets: string[] = [];
+  let fence: string[] | null = null;
 
   const flushBullets = () => {
     if (!bullets.length) return;
@@ -75,14 +83,36 @@ const ChatMarkdown: React.FC<{ content: string }> = ({ content }) => {
     );
   };
 
-  lines.forEach((line) => {
+  for (const line of text.split('\n')) {
+    if (fence) {
+      if (line.trim().startsWith('```')) {
+        const code = fence.join('\n');
+        fence = null;
+        blocks.push(
+          <pre key={`pre-${blocks.length}`} className="text-sm leading-relaxed text-white/90 whitespace-pre-wrap break-words font-sans">
+            {code}
+          </pre>
+        );
+        continue;
+      }
+      fence.push(line);
+      continue;
+    }
+    if (line.trim().startsWith('```')) {
+      flushBullets();
+      fence = [];
+      continue;
+    }
     const bullet = line.match(/^\s*[-*]\s+(.+)/);
     if (bullet) {
       bullets.push(bullet[1]);
-      return;
+      continue;
     }
     flushBullets();
-    if (!line.trim()) return;
+    if (!line.trim()) {
+      blocks.push(<div key={`sp-${blocks.length}`} className="h-2" />);
+      continue;
+    }
     const heading = line.match(/^#{1,3}\s+(.+)/);
     if (heading) {
       blocks.push(
@@ -90,17 +120,128 @@ const ChatMarkdown: React.FC<{ content: string }> = ({ content }) => {
           {renderInline(heading[1])}
         </p>
       );
-      return;
+      continue;
     }
     blocks.push(
       <p key={`p-${blocks.length}`} className="text-sm leading-relaxed text-white/90">
         {renderInline(line)}
       </p>
     );
-  });
+  }
+  if (fence && fence.length) {
+    blocks.push(
+      <pre key={`pre-${blocks.length}`} className="text-sm leading-relaxed text-white/90 whitespace-pre-wrap break-words font-sans">
+        {fence.join('\n')}
+      </pre>
+    );
+  }
   flushBullets();
 
-  return <div className="space-y-2">{blocks}</div>;
+  return <div className="space-y-0.5">{blocks}</div>;
+};
+
+function isHashtagLine(line: string) {
+  return /^(#\w+)(\s+#\w+)*$/.test(line.trim());
+}
+
+function isMetaLine(line: string) {
+  const text = line.trim();
+  if (!text) return false;
+  if (/^(\*|-|•)\s/.test(text)) return true;
+  if (/^\d+\.\s/.test(text)) return true;
+  if (/^(copy desk|one \w+ post only|char(?:acter)? count|total:|recounting|plain text|constraints|platform:|voice:|hook:|paragraph|para\s*\d|hashtags:|brand:|core value|user'?s request|output format|new total|wait,|note:)/i.test(text)) return true;
+  if (/^(x|twitter|linkedin|facebook|threads|instagram)\s*·/i.test(text)) return true;
+  if (/^\\n/.test(text)) return true;
+  if (/\btotal:\s*\d/i.test(text)) return true;
+  if (/too close|dangerous|under 280|max 2 hashtags/i.test(text)) return true;
+  if (/\(\d+\)\s*$/.test(text) && text.length < 90) return true;
+  return false;
+}
+
+function pasteReady(content: string) {
+  let text = String(content || '').replace(/\r\n/g, '\n');
+  const fences = [...text.matchAll(/```(?:[\w-]*)\n([\s\S]*?)```/g)].map((match) => match[1].trim());
+  if (fences.length) text = fences[fences.length - 1];
+  const blocks = text
+    .split(/\n\s*\n/)
+    .map((item) => item.trim())
+    .filter(Boolean)
+    .filter((block) => {
+      const lines = block.split('\n').map((line) => line.trim()).filter(Boolean);
+      if (!lines.length) return false;
+      if (isHashtagLine(block) && lines.length === 1) return true;
+      const metaHits = lines.filter((line) => isMetaLine(line)).length;
+      return metaHits < Math.ceil(lines.length * 0.6);
+    });
+  const hashIndex = [...blocks].reverse().findIndex((block) => isHashtagLine(block.split('\n').pop() || ''));
+  const picked = hashIndex >= 0
+    ? blocks.slice(Math.max(0, blocks.length - 1 - hashIndex - 3), blocks.length - hashIndex)
+    : blocks.slice(-3);
+  return picked
+    .join('\n\n')
+    .replace(/\*\*([^*]+)\*\*/g, '$1')
+    .replace(/^#{1,3}\s+/gm, '')
+    .replace(/\n{3,}/g, '\n\n')
+    .replace(/\n+I could not generate the image[\s\S]*$/i, '')
+    .trim();
+}
+
+const COPY_LIMITS: Record<string, number> = {
+  twitter: 280,
+  linkedin: 3000,
+  facebook: 5000,
+  threads: 500
+};
+
+const ComposerImage: React.FC<{ imageId: string; mimeType?: string }> = ({ imageId }) => {
+  const { authenticatedFetch } = useApp();
+  const [src, setSrc] = useState('');
+
+  useEffect(() => {
+    let alive = true;
+    let objectUrl = '';
+    const load = async () => {
+      try {
+        const res = await authenticatedFetch(`/api/auth/composer-images/${encodeURIComponent(imageId)}`);
+        if (!res.ok) return;
+        const blob = await res.blob();
+        objectUrl = URL.createObjectURL(blob);
+        if (alive) setSrc(objectUrl);
+      } catch {
+        /* keep caption usable without the visual */
+      }
+    };
+    load();
+    return () => {
+      alive = false;
+      if (objectUrl) URL.revokeObjectURL(objectUrl);
+    };
+  }, [authenticatedFetch, imageId]);
+
+  if (!src) {
+    return <div className="mt-2 h-36 rounded-xl bg-white/5 border border-white/10 animate-pulse" />;
+  }
+
+  const download = () => {
+    const link = document.createElement('a');
+    link.href = src;
+    link.download = `${imageId}.png`;
+    link.click();
+  };
+
+  return (
+    <div className="mt-2 space-y-1.5">
+      <img src={src} alt="Generated for this post" className="w-full rounded-xl border border-white/15 object-cover" />
+      <button
+        type="button"
+        onClick={download}
+        className="inline-flex items-center gap-1 text-[10px] text-white/55 hover:text-white"
+      >
+        <Download className="w-3 h-3" />
+        Download image
+      </button>
+    </div>
+  );
 };
 
 export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
@@ -108,7 +249,11 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
   title,
   placeholder = 'Type a message',
   managerId,
-  brandId
+  brandId,
+  emptyHint,
+  copyReplies = false,
+  extraBody,
+  className = ''
 }) => {
   const { authenticatedFetch } = useApp();
   const [threads, setThreads] = useState<ChatThread[]>([]);
@@ -120,6 +265,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
   const [learnedNote, setLearnedNote] = useState('');
   const [usedWeb, setUsedWeb] = useState(false);
   const [replaceLast, setReplaceLast] = useState(false);
+  const [copiedId, setCopiedId] = useState('');
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
 
@@ -198,7 +344,6 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
   const startEditLast = () => {
     if (sending || lastUserIndex < 0) return;
     setInput(messages[lastUserIndex].content);
-    setMessages(messages.slice(0, lastUserIndex));
     setReplaceLast(true);
     window.setTimeout(() => inputRef.current?.focus(), 0);
   };
@@ -223,7 +368,20 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
         prev.map((item) => (item.id === activeId ? { ...item, preview: text } : item))
       );
     }
-    setMessages((prev) => [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }]);
+    setMessages((prev) => {
+      if (!shouldReplace) {
+        return [...prev, { role: 'user', content: text, createdAt: new Date().toISOString() }];
+      }
+      const next = [...prev];
+      if (next[next.length - 1]?.role === 'assistant') next.pop();
+      for (let i = next.length - 1; i >= 0; i -= 1) {
+        if (next[i].role === 'user') {
+          next[i] = { ...next[i], content: text, edited: true };
+          break;
+        }
+      }
+      return next;
+    });
     try {
       setSending(true);
       const res = await authenticatedFetch('/api/auth/ask-ai', {
@@ -235,7 +393,8 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
           threadId: activeId,
           managerId,
           brandId,
-          replaceLast: shouldReplace
+          replaceLast: shouldReplace,
+          ...extraBody
         })
       });
       const json = await res.json();
@@ -260,7 +419,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
   };
 
   return (
-    <div className="rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden flex h-[min(70vh,560px)] min-h-[320px]">
+    <div className={`rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden flex h-[min(70vh,560px)] min-h-[320px] ${className}`}>
       {sidebarOpen && (
         <aside className="w-[42%] sm:w-56 md:w-64 shrink-0 min-h-0 border-r border-white/20 bg-white/10 backdrop-blur-xl flex flex-col p-3 space-y-3">
           <div className="flex items-center justify-between gap-2 px-1">
@@ -352,7 +511,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
         >
           {messages.length === 0 && (
             <p className="text-center text-[11px] text-white/45 py-8 px-4">
-              Teach the AI about your brand here. Facts you share are saved and used later.
+              {emptyHint || 'Teach the AI about your brand here. Facts you share are saved and used later.'}
             </p>
           )}
           {messages.map((item, idx) => {
@@ -382,19 +541,76 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
                       {item.content}
                     </p>
                   ) : (
-                    <ChatMarkdown content={item.content} />
+                    <>
+                      {copyReplies ? (
+                        <p className="text-sm leading-relaxed text-white whitespace-pre-wrap break-words">
+                          {pasteReady(item.content)}
+                        </p>
+                      ) : (
+                        <ChatMarkdown content={item.content} />
+                      )}
+                      {(item.images || []).map((image) => (
+                        <ComposerImage key={image.id} imageId={image.id} mimeType={image.mimeType} />
+                      ))}
+                      {item.imageNote && (
+                        <p className="mt-2 text-[11px] leading-relaxed text-white/55">{item.imageNote}</p>
+                      )}
+                      {copyReplies && (
+                        <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between gap-2">
+                          <span className="text-[10px] text-white/45">
+                            {(() => {
+                              const count = pasteReady(item.content).length;
+                              const key = String((extraBody?.platforms as string[] | undefined)?.[0] || '');
+                              const limit = COPY_LIMITS[key];
+                              const over = Boolean(limit && count > limit);
+                              return (
+                                <span className={over ? 'text-white' : undefined}>
+                                  {limit ? `${count} / ${limit} characters` : `${count} characters`}
+                                  {over ? ' · over the limit' : ''}
+                                </span>
+                              );
+                            })()}
+                          </span>
+                          <button
+                            type="button"
+                            onClick={async () => {
+                              try {
+                                await navigator.clipboard.writeText(pasteReady(item.content));
+                                setCopiedId(item.id || `${idx}`);
+                                window.setTimeout(() => setCopiedId(''), 1600);
+                              } catch {
+                                /* ignore clipboard denial */
+                              }
+                            }}
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white text-black text-[11px] font-medium"
+                            aria-label="Copy post"
+                          >
+                            {copiedId === (item.id || `${idx}`) ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
+                            {copiedId === (item.id || `${idx}`) ? 'Copied' : 'Copy post'}
+                          </button>
+                        </div>
+                      )}
+                    </>
                   )}
-                  <div className={`text-[9px] mt-1 ${mine ? 'text-white/70 text-right' : 'text-white/45'}`}>
-                    {formatTime(item.createdAt)}
-                  </div>
+                  {!copyReplies || mine ? (
+                    <div className={`text-[9px] mt-1 ${mine ? 'text-white/70 text-right' : 'text-white/45'}`}>
+                      {formatTime(item.createdAt)}
+                      {item.edited ? ' · Edited' : ''}
+                    </div>
+                  ) : null}
                 </div>
               </div>
             );
           })}
           {sending && (
             <div className="flex justify-start">
-              <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-white/60 text-[11px] px-3 py-2 rounded-2xl rounded-bl-md">
-                Typing…
+              <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-white/70 px-3 py-2 rounded-2xl rounded-bl-md inline-flex items-center gap-2">
+                <span className="text-[11px]">thinking</span>
+                <span className="inline-flex items-center gap-1" aria-hidden="true">
+                  <span className="wa-thinking-dot" />
+                  <span className="wa-thinking-dot" />
+                  <span className="wa-thinking-dot" />
+                </span>
               </div>
             </div>
           )}

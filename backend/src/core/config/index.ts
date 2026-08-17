@@ -61,6 +61,10 @@ export const config = {
     fineTunedModel: process.env.OPENAI_FINE_TUNED_MODEL || '',
     embeddingModel: process.env.EMBEDDING_MODEL || 'text-embedding-3-small',
     firecrawlApiKey: process.env.FIRECRAWL_API_KEY || '',
+    gemmaApiKey: process.env.GEMMA_API_KEY || process.env.GEMINI_API_KEY || process.env.GOOGLE_AI_API_KEY || '',
+    gemmaApiBase: process.env.GEMMA_API_BASE || 'https://generativelanguage.googleapis.com/v1beta',
+    gemmaModel: process.env.GEMMA_MODEL || 'gemma-4-31b-it',
+    gemmaImageModel: process.env.GEMMA_IMAGE_MODEL || process.env.GEMINI_IMAGE_MODEL || 'gemini-3.1-flash-image',
   },
   social: {
     redirectUri: process.env.SOCIAL_OAUTH_REDIRECT_URI || `${firstCorsOrigin}/api/social/callback`,

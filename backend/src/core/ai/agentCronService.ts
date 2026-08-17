@@ -149,8 +149,8 @@ async function tick(userId: string): Promise<void> {
     );
 
     if (approval === 'auto' && draft.text && draft.platforms.length && !shuttingDown) {
-      const { publishSocialPost } = await import('../../api/social/services/socialPublishService.js');
-      const summary = await publishSocialPost(userId, draft.text, draft.platforms);
+      const { publishSocialPostDetailed } = await import('../../api/social/services/socialPublishService.js');
+      const { summary, posts } = await publishSocialPostDetailed(userId, draft.text, draft.platforms);
       const live = await UserModel.findById(userId);
       const current = (live?.agentRuns || []).find((item: any) => item.runId === runId);
       if (current?.status === 'failed') {
@@ -158,13 +158,18 @@ async function tick(userId: string): Promise<void> {
         return;
       }
       const traces = String(summary).split('\n').filter(Boolean).map((label) => trace(label));
+      const publishedPosts = posts
+        .filter((item) => item.ok && item.postId)
+        .map((item) => ({ platform: item.platform, postId: item.postId, url: item.url || '', label: item.label }));
       await UserModel.updateOne(
         { _id: userId, agentRuns: { $elemMatch: { runId } } },
         {
           $set: {
             'agentRuns.$.status': 'succeeded',
             'agentRuns.$.approved': true,
-            'agentRuns.$.note': 'Cron posted'
+            'agentRuns.$.note': 'Cron posted',
+            'agentRuns.$.publishedPosts': publishedPosts,
+            'agentRuns.$.analytics': { impressions: 0, likes: 0, comments: 0, shares: 0 }
           },
           $push: { 'agentRuns.$.traces': { $each: [...traces, trace('Cron finished')] } }
         }

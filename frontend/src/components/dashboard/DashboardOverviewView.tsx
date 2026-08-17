@@ -42,6 +42,11 @@ export const DashboardOverviewView: React.FC = () => {
     let mounted = true;
     const load = async () => {
       try {
+        try {
+          await authenticatedFetch('/api/auth/post-analytics/refresh', { method: 'POST' });
+        } catch {
+          /* keep cached analytics */
+        }
         const res = await authenticatedFetch('/api/auth/dashboard-stats');
         const json = await res.json();
         if (!json.success || !json.data || !mounted) return;
@@ -69,10 +74,18 @@ export const DashboardOverviewView: React.FC = () => {
       }
     };
     load();
-    const timer = setInterval(load, 10000);
+    const timer = setInterval(() => {
+      if (document.visibilityState !== 'visible') return;
+      load();
+    }, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') load();
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       mounted = false;
       clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
   }, [authenticatedFetch]);
 
