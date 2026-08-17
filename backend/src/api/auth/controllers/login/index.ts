@@ -14,6 +14,14 @@ export const loginController = async (req: Request, res: Response): Promise<void
     res.json({ success: true, data: result });
   } catch (error: any) {
     logger.error(`LoginController Error: ${error.message}`);
-    res.status(500).json({ success: false, error: 'Authentication failed' });
+    const starting = /closing|closed|topology|not connected|ECONNREFUSED|buffering timed out|interrupted/i.test(
+      error.message || ''
+    );
+    res.status(starting ? 503 : 500).json({
+      success: false,
+      error: starting
+        ? 'The server is still starting. Try signing in again in a moment.'
+        : 'Authentication failed',
+    });
   }
 };

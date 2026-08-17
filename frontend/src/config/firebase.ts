@@ -1,6 +1,10 @@
-import { initializeApp } from 'firebase/app';
+import { getApps, initializeApp } from 'firebase/app';
 import {
   getAuth,
+  initializeAuth,
+  browserLocalPersistence,
+  browserSessionPersistence,
+  browserPopupRedirectResolver,
   GoogleAuthProvider,
   signInWithPopup,
   signInWithCredential,
@@ -25,16 +29,53 @@ export const googleWebClientId = String(
   || '107926694606-9obo130a9mhfcfv2psn3em3b9050a9cd.apps.googleusercontent.com'
 ).trim();
 
-export const app = initializeApp(firebaseConfig);
-export const auth = getAuth(app);
+export const app = getApps()[0] || initializeApp(firebaseConfig);
+// localStorage persistence avoids Chrome closing IndexedDB when the Google popup hides this tab
+export const auth = (() => {
+  try {
+    return initializeAuth(app, {
+      persistence: [browserLocalPersistence, browserSessionPersistence],
+      popupRedirectResolver: browserPopupRedirectResolver,
+    });
+  } catch {
+    return getAuth(app);
+  }
+})();
 export const googleProvider = new GoogleAuthProvider();
 googleProvider.setCustomParameters({ prompt: 'select_account' });
 googleProvider.addScope('email');
 googleProvider.addScope('profile');
 export const storage = getStorage(app);
 
+function isIndexedDbClosingError(error: any): boolean {
+  const text = `${error?.code || ''} ${error?.message || ''} ${error?.name || ''}`;
+  return /indexeddb|idbdatabase|database.*(closing|closed|hidden)|closing.*hidden/i.test(text);
+}
+
+function sleep(ms: number): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+async function whenTabVisible(): Promise<void> {
+  if (typeof document === 'undefined' || document.visibilityState === 'visible') return;
+  await new Promise<void>((resolve) => {
+    const finish = () => {
+      document.removeEventListener('visibilitychange', onChange);
+      resolve();
+    };
+    const onChange = () => {
+      if (document.visibilityState === 'visible') finish();
+    };
+    document.addEventListener('visibilitychange', onChange);
+    setTimeout(finish, 4000);
+  });
+}
+
 function friendlyAuthError(error: any): string {
   const code = error?.code || '';
+  if (isIndexedDbClosingError(error)) {
+    return 'Google sign-in was interrupted while the window was in the background. Try Continue with Google again.';
+  }
   if (code === 'auth/unauthorized-domain') {
     return 'This website domain is not yet allowed for Google sign-in. Add vamvamvamai.com in Firebase Authentication → Settings → Authorized domains.';
   }
@@ -63,50 +104,69 @@ export async function uploadUserMedia(
   return getDownloadURL(fileRef);
 }
 
+function isMissingGoogleProvider(error: any): boolean {
+  return (
+    error?.code === 'auth/configuration-not-found' ||
+    error?.message?.includes('configuration-not-found') ||
+    error?.code === 'auth/operation-not-allowed'
+  );
+}
+
 // Google OAuth Sign In Helper with Fallback for unconfigured console provider
 export const loginWithGoogleOAuth = async () => {
-  try {
-    const result = await signInWithPopup(auth, googleProvider);
-    const token = await result.user.getIdToken();
-    return {
-      success: true,
-      user: result.user,
-      token,
-    };
-  } catch (error: any) {
-    console.error('Firebase Google OAuth Error:', error);
+  await whenTabVisible();
+  let lastError: any;
 
-    // If Google Auth provider is not enabled in Firebase Console (auth/configuration-not-found),
-    // provide a seamless fallback authenticated session so sign in succeeds gracefully.
-    if (
-      error?.code === 'auth/configuration-not-found' ||
-      error?.message?.includes('configuration-not-found') ||
-      error?.code === 'auth/operation-not-allowed'
-    ) {
-      console.warn(
-        '⚠️ Firebase Google Sign-In provider not yet enabled in Firebase Console for project [ajeoba-web-storage]. Using verified fallback session.'
-      );
-      const fallbackUser = {
-        uid: 'google_usr_' + Math.random().toString(36).substring(2, 9),
-        displayName: 'Vamvamvam Google User',
-        email: 'user@vamvamvam.ai',
-        photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
-        getIdToken: async () => 'mock_firebase_id_token_2026',
-      } as any;
-
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const result = await signInWithPopup(auth, googleProvider);
+      const token = await result.user.getIdToken();
       return {
         success: true,
-        user: fallbackUser,
-        token: 'mock_firebase_id_token_2026',
-        isFallback: true,
+        user: result.user,
+        token,
+      };
+    } catch (error: any) {
+      lastError = error;
+      console.error('Firebase Google OAuth Error:', error);
+
+      if (isMissingGoogleProvider(error)) {
+        console.warn(
+          '⚠️ Firebase Google Sign-In provider not yet enabled in Firebase Console for project [ajeoba-web-storage]. Using verified fallback session.'
+        );
+        const fallbackUser = {
+          uid: 'google_usr_' + Math.random().toString(36).substring(2, 9),
+          displayName: 'Vamvamvam Google User',
+          email: 'user@vamvamvam.ai',
+          photoURL: 'https://images.unsplash.com/photo-1534528741775-53994a69daeb?auto=format&fit=crop&w=250&q=80',
+          getIdToken: async () => 'mock_firebase_id_token_2026',
+        } as any;
+
+        return {
+          success: true,
+          user: fallbackUser,
+          token: 'mock_firebase_id_token_2026',
+          isFallback: true,
+        };
+      }
+
+      if (isIndexedDbClosingError(error) && attempt < 2) {
+        await whenTabVisible();
+        await sleep(400 * (attempt + 1));
+        continue;
+      }
+
+      return {
+        success: false,
+        error: friendlyAuthError(error),
       };
     }
-
-    return {
-      success: false,
-      error: friendlyAuthError(error),
-    };
   }
+
+  return {
+    success: false,
+    error: friendlyAuthError(lastError),
+  };
 };
 
 export const loginWithGoogleIdToken = async (idToken: string) => {

@@ -1,6 +1,6 @@
 import { createApp } from './app/index.js';
 import { config } from './core/config/index.js';
-import { connectDatabase } from './core/db/index.js';
+import { connectDatabase, disconnectDatabase } from './core/db/index.js';
 import { logger } from './core/logger/index.js';
 import { agentCronService } from './core/ai/agentCronService.js';
 
@@ -41,7 +41,12 @@ const startServer = async () => {
     } catch (err: any) {
       logger.warn(`Cron shutdown warning: ${err.message}`);
     }
-    server.close(() => {
+    server.close(async () => {
+      try {
+        await disconnectDatabase();
+      } catch (err: any) {
+        logger.warn(`Database disconnect warning: ${err.message}`);
+      }
       logger.info('HTTP server closed');
       process.exit(0);
     });

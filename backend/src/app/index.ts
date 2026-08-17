@@ -1,6 +1,7 @@
 import express, { Express, Request, Response, NextFunction } from 'express';
 import { corsMiddleware } from '../core/cors/index.js';
 import { logger } from '../core/logger/index.js';
+import { databaseStatus } from '../core/db/index.js';
 
 // Import Sub-Business Routes
 import authRoutes from '../api/auth/routes/index.js';
@@ -27,8 +28,10 @@ export const createApp = (): Express => {
 
   // Health check
   app.get('/health', (req: Request, res: Response) => {
+    const db = databaseStatus();
     res.json({
-      status: 'healthy',
+      status: db === 'connected' ? 'healthy' : 'starting',
+      db,
       app: 'Bros AI Express Backend',
       env: process.env.NODE_ENV || 'development',
       timestamp: new Date().toISOString()
