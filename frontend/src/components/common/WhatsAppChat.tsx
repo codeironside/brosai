@@ -158,7 +158,68 @@ function isMetaLine(line: string) {
   return false;
 }
 
-function pasteReady(content: string) {
+const COPY_LIMITS: Record<string, number> = {
+  twitter: 280,
+  linkedin: 3000,
+  facebook: 5000,
+  threads: 500
+};
+
+function platformCharCount(text: string, platform?: string) {
+  const key = String(platform || '').toLowerCase() === 'x' ? 'twitter' : String(platform || '').toLowerCase();
+  const weighted = key === 'twitter' || key === 'threads';
+  let n = 0;
+  for (const ch of String(text || '')) {
+    const cp = ch.codePointAt(0) || 0;
+    n += weighted && cp > 0x10ff ? 2 : 1;
+  }
+  return n;
+}
+
+function clipToCount(text: string, budget: number, platform?: string) {
+  const points = Array.from(String(text || ''));
+  if (platformCharCount(points.join(''), platform) <= budget) return points.join('').trimEnd();
+  let lo = 0;
+  let hi = points.length;
+  while (lo < hi) {
+    const mid = Math.ceil((lo + hi) / 2);
+    if (platformCharCount(points.slice(0, mid).join(''), platform) <= budget) lo = mid;
+    else hi = mid - 1;
+  }
+  let cut = points.slice(0, lo).join('').trimEnd();
+  const space = cut.lastIndexOf(' ');
+  const newline = cut.lastIndexOf('\n');
+  const breakAt = Math.max(space, newline);
+  if (breakAt > cut.length * 0.5) cut = cut.slice(0, breakAt).trimEnd();
+  while (cut && platformCharCount(cut, platform) > budget) {
+    const next = Array.from(cut);
+    next.pop();
+    cut = next.join('').trimEnd();
+  }
+  return cut;
+}
+
+function fitToLimit(text: string, limit: number, platform?: string) {
+  const clean = String(text || '').replace(/\r\n/g, '\n').replace(/\n{3,}/g, '\n\n').trim();
+  if (!clean || !limit) return clean;
+  if (platformCharCount(clean, platform) <= limit) return clean;
+  const lines = clean.split('\n');
+  let tags = '';
+  if (isHashtagLine(lines[lines.length - 1] || '')) {
+    tags = (lines.pop() || '').trim();
+    while (lines.length && !lines[lines.length - 1].trim()) lines.pop();
+  }
+  const body = lines.join('\n').trim();
+  const suffix = tags ? `\n\n${tags}` : '';
+  const suffixCount = platformCharCount(suffix, platform);
+  if (suffix && suffixCount < limit) {
+    const fitted = `${clipToCount(body, limit - suffixCount, platform)}${suffix}`.trim();
+    if (platformCharCount(fitted, platform) <= limit) return fitted;
+  }
+  return clipToCount(body || clean, limit, platform);
+}
+
+function pasteReady(content: string, platform?: string) {
   let text = String(content || '').replace(/\r\n/g, '\n');
   const fences = [...text.matchAll(/```(?:[\w-]*)\n([\s\S]*?)```/g)].map((match) => match[1].trim());
   if (fences.length) text = fences[fences.length - 1];
@@ -177,21 +238,17 @@ function pasteReady(content: string) {
   const picked = hashIndex >= 0
     ? blocks.slice(Math.max(0, blocks.length - 1 - hashIndex - 3), blocks.length - hashIndex)
     : blocks.slice(-3);
-  return picked
+  const post = picked
     .join('\n\n')
     .replace(/\*\*([^*]+)\*\*/g, '$1')
     .replace(/^#{1,3}\s+/gm, '')
     .replace(/\n{3,}/g, '\n\n')
     .replace(/\n+I could not generate the image[\s\S]*$/i, '')
     .trim();
+  const key = String(platform || '').toLowerCase() === 'x' ? 'twitter' : String(platform || '').toLowerCase();
+  const limit = COPY_LIMITS[key];
+  return limit ? fitToLimit(post, limit, key) : post;
 }
-
-const COPY_LIMITS: Record<string, number> = {
-  twitter: 280,
-  linkedin: 3000,
-  facebook: 5000,
-  threads: 500
-};
 
 const ComposerImage: React.FC<{ imageId: string; mimeType?: string }> = ({ imageId }) => {
   const { authenticatedFetch } = useApp();
@@ -544,7 +601,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
                     <>
                       {copyReplies ? (
                         <p className="text-sm leading-relaxed text-white whitespace-pre-wrap break-words">
-                          {pasteReady(item.content)}
+                          {pasteReady(item.content, String((extraBody?.platforms as string[] | undefined)?.[0] || ''))}
                         </p>
                       ) : (
                         <ChatMarkdown content={item.content} />
@@ -559,23 +616,19 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
                         <div className="mt-3 pt-2 border-t border-white/10 flex items-center justify-between gap-2">
                           <span className="text-[10px] text-white/45">
                             {(() => {
-                              const count = pasteReady(item.content).length;
                               const key = String((extraBody?.platforms as string[] | undefined)?.[0] || '');
-                              const limit = COPY_LIMITS[key];
-                              const over = Boolean(limit && count > limit);
-                              return (
-                                <span className={over ? 'text-white' : undefined}>
-                                  {limit ? `${count} / ${limit} characters` : `${count} characters`}
-                                  {over ? ' · over the limit' : ''}
-                                </span>
-                              );
+                              const post = pasteReady(item.content, key);
+                              const limit = COPY_LIMITS[key === 'x' ? 'twitter' : key];
+                              const count = platformCharCount(post, key);
+                              return limit ? `${count} / ${limit} characters` : `${count} characters`;
                             })()}
                           </span>
                           <button
                             type="button"
                             onClick={async () => {
                               try {
-                                await navigator.clipboard.writeText(pasteReady(item.content));
+                                const key = String((extraBody?.platforms as string[] | undefined)?.[0] || '');
+                                await navigator.clipboard.writeText(pasteReady(item.content, key));
                                 setCopiedId(item.id || `${idx}`);
                                 window.setTimeout(() => setCopiedId(''), 1600);
                               } catch {

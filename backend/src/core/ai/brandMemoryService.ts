@@ -264,20 +264,24 @@ blank line
 hashtags only on the last line
 
 Rules for this network: ${target.extra}
-Stay under ${target.limit} characters including spaces and line breaks.
-Never invent products, prices, stats, or facts. Use the brand profile.
+HARD CAP: ${target.limit} characters. Spaces, line breaks, and emojis count. Never go over ${target.limit}. If needed, cut words — do not return a longer post.
+Never invent products, prices, stats, or facts.
 
 BRAND PROFILE:
 ${brandCard}
 
 RELEVANT MEMORY:
 ${memory}`;
-      const { extractComposerPost } = await import('./composerPost.js');
       const rawReply = await gemmaService.generateCompletion(userMessage, system, recentHistory, {
         temperature: 0.7,
-        maxTokens: wanted[0] === 'twitter' || wanted[0] === 'threads' ? 320 : 700
+        maxTokens: wanted[0] === 'twitter' || wanted[0] === 'threads' ? 220 : 700
       });
-      const reply = extractComposerPost(rawReply, target.limit) || rawReply.trim();
+      const { extractComposerPost, fitToLimit } = await import('./composerPost.js');
+      const reply = fitToLimit(
+        extractComposerPost(rawReply, target.limit, wanted[0]) || rawReply.trim(),
+        target.limit,
+        wanted[0]
+      );
       const images: Array<{ id: string; mimeType: string }> = [];
       let imageNote = '';
       const { shouldMakeImage, generateComposerImage } = await import('./geminiImageService.js');
