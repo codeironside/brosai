@@ -2,14 +2,14 @@ import React, { useState } from 'react';
 import { 
   Bot, 
   Activity, 
-  Shield, 
   AlertTriangle, 
   DollarSign, 
   Brain, 
   Share2,
   Sparkles,
   User,
-  LayoutDashboard
+  LayoutDashboard,
+  PenLine
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { HLSVideo } from '../common/HLSVideo';
@@ -20,10 +20,11 @@ import { ProfileSettingsView } from '../dashboard/ProfileSettingsView';
 import { AgentRunsView } from '../dashboard/AgentRunsView';
 import { LiveTracesView } from '../dashboard/LiveTracesView';
 import { DashboardOverviewView } from '../dashboard/DashboardOverviewView';
+import { CopyDeskView } from '../dashboard/CopyDeskView';
 
 export const DashboardPageView: React.FC = () => {
   const { user } = useApp();
-  const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'social' | 'hire-ai' | 'brain' | 'traces' | 'approvals' | 'errors' | 'usage' | 'settings'>(() => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'social' | 'hire-ai' | 'brain' | 'traces' | 'copy-desk' | 'errors' | 'usage' | 'settings'>(() => {
     if (typeof window === 'undefined') return 'overview';
     const params = new URLSearchParams(window.location.search);
     if (params.get('oauth') || sessionStorage.getItem('brosai_return_social') === '1') {
@@ -43,7 +44,7 @@ export const DashboardPageView: React.FC = () => {
     { id: 'hire-ai', label: 'Hire Your AI', icon: Sparkles },
     { id: 'runs', label: 'Agent Runs', icon: Bot },
     { id: 'traces', label: 'Live Traces', icon: Activity },
-    { id: 'approvals', label: 'Approvals', icon: Shield },
+    { id: 'copy-desk', label: 'Copy Desk', icon: PenLine },
     { id: 'errors', label: 'Errors', icon: AlertTriangle },
     { id: 'usage', label: 'Cost & Usage', icon: DollarSign },
     { id: 'settings', label: 'Profile Settings', icon: User },
@@ -146,7 +147,8 @@ export const DashboardPageView: React.FC = () => {
         {activeTab === 'settings' && <ProfileSettingsView />}
         {activeTab === 'runs' && <AgentRunsView />}
         {activeTab === 'traces' && <LiveTracesView />}
-        {['approvals', 'errors', 'usage'].includes(activeTab) && (
+        {activeTab === 'copy-desk' && <CopyDeskView />}
+        {['errors', 'usage'].includes(activeTab) && (
           <div className="p-6 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 text-sm text-white/70">
             This panel is coming next. Use Agent Runs to start and stop your hired AI.
             </div>

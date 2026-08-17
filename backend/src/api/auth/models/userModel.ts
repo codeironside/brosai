@@ -135,14 +135,27 @@ const UserSchema = new mongoose.Schema({
       platforms: [String],
       note: String,
       traces: [{ at: Date, label: String }],
+      publishedPosts: [{
+        platform: String,
+        postId: String,
+        url: String,
+        label: String
+      }],
       analytics: {
         impressions: { type: Number, default: 0 },
         likes: { type: Number, default: 0 },
         comments: { type: Number, default: 0 },
         shares: { type: Number, default: 0 }
-      }
+      },
+      analyticsByPlatform: mongoose.Schema.Types.Mixed,
+      analyticsFetchedAt: Date
     }
   ],
+
+  analyticsSync: {
+    lastAt: Date,
+    backoffUntil: Date
+  },
 
   knowledgeBase: [
     {
@@ -159,7 +172,7 @@ const UserSchema = new mongoose.Schema({
 
   aiConversations: {
     type: mongoose.Schema.Types.Mixed,
-    default: () => ({ hireAi: [], brandBrain: [] })
+    default: () => ({ hireAi: [], brandBrain: [], composer: [] })
   },
 
   notificationSettings: {

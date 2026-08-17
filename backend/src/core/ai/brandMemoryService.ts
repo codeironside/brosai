@@ -212,11 +212,13 @@ export class BrandMemoryService {
     userId: string,
     userMessage: string,
     history: Array<{ role: string; content: string }> = [],
-    options: { threadId?: string; managerId?: string; brandId?: string; channel?: 'hireAi' | 'brandBrain' } = {}
+    options: { threadId?: string; managerId?: string; brandId?: string; channel?: 'hireAi' | 'brandBrain' | 'composer'; platforms?: string[]; wantImage?: boolean } = {}
   ): Promise<{
     reply: string;
     sources: RankedMemory[];
     usedWeb: boolean;
+    images?: Array<{ id: string; mimeType: string }>;
+    imageNote?: string;
   }> {
     const dbUser = await UserModel.findById(userId);
     if (!dbUser) {
@@ -232,11 +234,73 @@ export class BrandMemoryService {
     const sources = await this.retrieve(userId, userMessage, 8, brandId);
     const brandCard = this.formatBrandCard(dbUser, { managerId: manager?.id, brandId });
     const memory = vectorStoreService.formatRetrievedContext(sources);
-    const otherChats = this.otherChatsRecap(dbUser, options.threadId);
     const recentHistory = history.slice(-24);
     const managerName = manager?.name || 'Alex';
     const savedSites = [brain?.website].filter(Boolean).join(', ');
 
+    if (options.channel === 'composer') {
+      const { gemmaService } = await import('./gemmaService.js');
+      const { listConnectedPublishTargets } = await import('../../api/social/services/socialPublishService.js');
+      const connected = await listConnectedPublishTargets(userId);
+      const wanted = [(options.platforms || [])
+        .map((item) => String(item).toLowerCase() === 'x' ? 'twitter' : String(item).toLowerCase())
+        .find(Boolean) || connected[0]?.platform || 'twitter'];
+      const spec: Record<string, { label: string; limit: number; extra: string }> = {
+        twitter: { label: 'X', limit: 280, extra: 'At most 2 hashtags. Hard 280-character cap including spaces and emojis.' },
+        linkedin: { label: 'LinkedIn', limit: 3000, extra: 'Hook in the first two lines. Prefer 800–1,200 characters. At most 5 hashtags on the last line.' },
+        facebook: { label: 'Facebook', limit: 5000, extra: 'Prefer under 500 characters. Conversational. At most 3 hashtags.' },
+        threads: { label: 'Threads', limit: 500, extra: 'Sounds like a person. 500-character cap. Hashtags sparingly.' }
+      };
+      const target = spec[wanted[0]] || spec.twitter;
+      const system = `You write one finished social post for ${brain?.brandName || 'this brand'} that the user will paste as-is.
+
+Return ONLY the post. No intro, no labels, no planning, no character math, no platform name, no "Copy Desk", no bullets, no markdown.
+
+Shape:
+line 1: hook
+blank line
+1 or 2 short paragraphs
+blank line
+hashtags only on the last line
+
+Rules for this network: ${target.extra}
+Stay under ${target.limit} characters including spaces and line breaks.
+Never invent products, prices, stats, or facts. Use the brand profile.
+
+BRAND PROFILE:
+${brandCard}
+
+RELEVANT MEMORY:
+${memory}`;
+      const { extractComposerPost } = await import('./composerPost.js');
+      const rawReply = await gemmaService.generateCompletion(userMessage, system, recentHistory, {
+        temperature: 0.7,
+        maxTokens: wanted[0] === 'twitter' || wanted[0] === 'threads' ? 320 : 700
+      });
+      const reply = extractComposerPost(rawReply, target.limit) || rawReply.trim();
+      const images: Array<{ id: string; mimeType: string }> = [];
+      let imageNote = '';
+      const { shouldMakeImage, generateComposerImage } = await import('./geminiImageService.js');
+      if (shouldMakeImage(userMessage, options.wantImage)) {
+        try {
+          const made = await generateComposerImage({
+            userId,
+            userMessage,
+            caption: reply,
+            brandName: brain?.brandName,
+            platforms: wanted
+          });
+          if (made.image) images.push(made.image);
+          else imageNote = made.error || 'The image could not be created this time. Your caption is ready to copy.';
+        } catch (err: any) {
+          logger.warn(`Composer image skipped: ${err.message}`);
+          imageNote = 'The image could not be created this time. Your caption is ready to copy.';
+        }
+      }
+      return { reply, sources, usedWeb: false, images, imageNote: imageNote || undefined };
+    }
+
+    const otherChats = this.otherChatsRecap(dbUser, options.threadId);
     const system = `You are ${managerName}, the hired AI for this customer.
 You work for ONE linked brand only${brain?.brandName ? `: ${brain.brandName}` : ''}.
 Do not mix in other brands this customer may have.

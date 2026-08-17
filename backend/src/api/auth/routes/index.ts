@@ -729,17 +729,30 @@ router.post('/knowledge-base/search', authenticateToken, async (req: Request, re
   }
 });
 
-function conversationChannel(raw?: string): 'hireAi' | 'brandBrain' {
-  return raw === 'brand-brain' || raw === 'brandBrain' ? 'brandBrain' : 'hireAi';
+function conversationChannel(raw?: string): 'hireAi' | 'brandBrain' | 'composer' {
+  const value = String(raw || '').trim();
+  if (value === 'brand-brain' || value === 'brandBrain') return 'brandBrain';
+  if (value === 'composer' || value === 'copy-desk' || value === 'copyDesk') return 'composer';
+  return 'hireAi';
 }
 
 function publicMessages(list: any[] = []) {
-  return (Array.isArray(list) ? list : []).slice(-80).map((item: any) => ({
-    id: item.id,
-    role: item.role,
-    content: item.content,
-    createdAt: item.createdAt
-  }));
+  return (Array.isArray(list) ? list : []).slice(-80).map((item: any) => {
+    const images = Array.isArray(item.images)
+      ? item.images
+        .filter((image: any) => image?.id)
+        .map((image: any) => ({ id: image.id, mimeType: image.mimeType || 'image/png' }))
+      : [];
+    return {
+      id: item.id,
+      role: item.role,
+      content: item.content,
+      createdAt: item.createdAt,
+      ...(item.edited ? { edited: true } : {}),
+      ...(item.imageNote ? { imageNote: String(item.imageNote) } : {}),
+      ...(images.length ? { images } : {})
+    };
+  });
 }
 
 function titleFromMessages(messages: any[] = []) {
@@ -796,13 +809,13 @@ function publicThreadList(threads: any[]) {
     }));
 }
 
-async function loadChannelThreads(userId: string, channel: 'hireAi' | 'brandBrain') {
+async function loadChannelThreads(userId: string, channel: 'hireAi' | 'brandBrain' | 'composer') {
   const dbUser = await UserModel.findById(userId).lean();
   const stored = (dbUser as any)?.aiConversations?.[channel] || [];
   return normalizeThreads(stored);
 }
 
-async function saveChannelThreads(userId: string, channel: 'hireAi' | 'brandBrain', threads: any[]) {
+async function saveChannelThreads(userId: string, channel: 'hireAi' | 'brandBrain' | 'composer', threads: any[]) {
   await UserModel.updateOne(
     { _id: userId },
     { $set: { [`aiConversations.${channel}`]: threads } }
@@ -938,6 +951,28 @@ router.delete('/ai-chat', authenticateToken, async (req: Request, res: Response)
   }
 });
 
+router.get('/composer-images/:id', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { readComposerImage } = await import('../../../core/ai/geminiImageService.js');
+    const image = await readComposerImage(userId, String(req.params.id || ''));
+    if (!image) {
+      res.status(404).json({ success: false, error: 'Image not found' });
+      return;
+    }
+    res.setHeader('Content-Type', image.mimeType);
+    res.setHeader('Cache-Control', 'private, max-age=86400');
+    res.send(image.buffer);
+  } catch (err: any) {
+    logger.error(`Composer image read failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Could not load that image.' });
+  }
+});
+
 router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -971,14 +1006,28 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
     let stored = publicMessages(thread.messages || []);
     if (req.body?.replaceLast) {
       if (stored.at(-1)?.role === 'assistant') stored = stored.slice(0, -1);
-      if (stored.at(-1)?.role === 'user') stored = stored.slice(0, -1);
+      const lastUser = stored.at(-1);
+      if (lastUser?.role === 'user') {
+        lastUser.content = message;
+        lastUser.edited = true;
+        thread.messages = stored;
+      } else {
+        thread.messages = [
+          ...stored,
+          { id: `msg_${Date.now()}_u`, role: 'user', content: message, createdAt: new Date(), edited: true }
+        ];
+      }
+    } else {
+      thread.messages = [
+        ...stored,
+        { id: `msg_${Date.now()}_u`, role: 'user', content: message, createdAt: new Date() }
+      ];
     }
-    const history = stored.map((item) => ({ role: item.role, content: item.content }));
-    const isFirstUserTurn = !stored.some((item) => item.role === 'user');
-    thread.messages = [
-      ...stored,
-      { id: `msg_${Date.now()}_u`, role: 'user', content: message, createdAt: new Date() }
-    ];
+    const history = (thread.messages || [])
+      .slice(0, -1)
+      .map((item: any) => ({ role: item.role, content: item.content }));
+    const isFirstUserTurn = !req.body?.replaceLast
+      && (thread.messages || []).filter((item: any) => item.role === 'user').length === 1;
     thread.updatedAt = new Date();
     if (isFirstUserTurn) {
       thread.title = titleFromMessages(thread.messages);
@@ -988,16 +1037,22 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
     let reply = '';
     let usedWeb = false;
     let sources: any[] = [];
+    let images: Array<{ id: string; mimeType: string }> = [];
+    let imageNote = '';
     try {
       const result = await brandMemoryService.generateWithMemory(userId, message, history, {
         threadId: thread.id,
         managerId: String(req.body?.managerId || '').trim() || undefined,
         brandId: String(req.body?.brandId || '').trim() || undefined,
-        channel
+        channel,
+        platforms: Array.isArray(req.body?.platforms) ? req.body.platforms : undefined,
+        wantImage: typeof req.body?.wantImage === 'boolean' ? req.body.wantImage : undefined
       });
       reply = result.reply;
       usedWeb = Boolean(result.usedWeb);
       sources = result.sources || [];
+      images = Array.isArray(result.images) ? result.images : [];
+      imageNote = String(result.imageNote || '');
     } catch (err: any) {
       logger.error(`Ask AI generation failed: ${err.message}`);
       reply = 'I could not finish that just now. Please try again.';
@@ -1007,7 +1062,7 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
     const live = latest.find((item) => item.id === thread.id) || thread;
     live.messages = [
       ...publicMessages(live.messages || []),
-      { id: `msg_${Date.now()}_a`, role: 'assistant', content: reply, createdAt: new Date() }
+      { id: `msg_${Date.now()}_a`, role: 'assistant', content: reply, createdAt: new Date(), images, ...(imageNote ? { imageNote } : {}) }
     ].slice(-80);
     live.updatedAt = new Date();
     if (isFirstUserTurn && !live.titledByAi) {
@@ -1025,10 +1080,12 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
     await saveChannelThreads(userId, channel, nextThreads);
 
     let learned = 0;
-    try {
-      learned = await brandMemoryService.learnFromChat(userId, live.id, message, reply, history, live.title);
-    } catch (err: any) {
-      logger.warn(`learnFromChat failed: ${err.message}`);
+    if (channel !== 'composer') {
+      try {
+        learned = await brandMemoryService.learnFromChat(userId, live.id, message, reply, history, live.title);
+      } catch (err: any) {
+        logger.warn(`learnFromChat failed: ${err.message}`);
+      }
     }
 
     res.json({
@@ -1175,6 +1232,22 @@ router.post('/runs', authenticateToken, async (req: Request, res: Response): Pro
 });
 
 // Real Dynamic Dashboard Statistics Route (Calculated 100% strictly from MongoDB User collection)
+router.post('/post-analytics/refresh', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const { refreshPostAnalytics } = await import('../../social/services/postAnalyticsService.js');
+    const result = await refreshPostAnalytics(userId);
+    res.json({ success: true, ...result });
+  } catch (err: any) {
+    logger.error(`Post analytics refresh failed: ${err.message}`);
+    res.status(500).json({ success: false, error: 'Could not refresh post reach.' });
+  }
+});
+
 router.get('/dashboard-stats', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const dbUser = await UserModel.findById(req.user?.id);
@@ -1224,7 +1297,9 @@ router.get('/dashboard-stats', authenticateToken, async (req: Request, res: Resp
           perAccountMap[platform] = { platform, label: platformLabels[platform] || platform, posts: 0, ...emptyAnalytics };
         }
         perAccountMap[platform].posts += 1;
-        const next = addAnalytics(perAccountMap[platform], run.analytics);
+        const slice = run.analyticsByPlatform?.[platform]
+          || (platforms.length === 1 ? run.analytics : emptyAnalytics);
+        const next = addAnalytics(perAccountMap[platform], slice);
         perAccountMap[platform] = { ...perAccountMap[platform], ...next };
       });
     });
@@ -1268,7 +1343,9 @@ router.get('/dashboard-stats', authenticateToken, async (req: Request, res: Resp
         platforms: r.platforms || [],
         note: r.note || '',
         traces: Array.isArray(r.traces) ? r.traces : [],
-        analytics: r.analytics || { impressions: 0, likes: 0, comments: 0, shares: 0 }
+        publishedPosts: Array.isArray(r.publishedPosts) ? r.publishedPosts : [],
+        analytics: r.analytics || { impressions: 0, likes: 0, comments: 0, shares: 0 },
+        analyticsByPlatform: r.analyticsByPlatform || {}
       };
       })
     };
@@ -1311,12 +1388,16 @@ router.post('/runs/:id/approve', authenticateToken, async (req: Request, res: Re
 
     const run = (claimed.agentRuns || []).find((r: any) => r.id === id || r.runId === id);
     let traces: Array<{ at: Date; label: string }> = [{ at: new Date(), label: 'Publishing started' }];
+    let publishedPosts: Array<{ platform: string; postId?: string; url?: string; label: string }> = [];
     if (run?.draft && Array.isArray(run.platforms) && run.platforms.length) {
-      const { publishSocialPost } = await import('../../social/services/socialPublishService.js');
-      const summary = await publishSocialPost(userId, String(run.draft), run.platforms);
+      const { publishSocialPostDetailed } = await import('../../social/services/socialPublishService.js');
+      const { summary, posts } = await publishSocialPostDetailed(userId, String(run.draft), run.platforms);
       traces = traces.concat(
         String(summary).split('\n').filter(Boolean).map((label) => ({ at: new Date(), label }))
       );
+      publishedPosts = posts
+        .filter((item) => item.ok && item.postId)
+        .map((item) => ({ platform: item.platform, postId: item.postId, url: item.url || '', label: item.label }));
     }
     traces.push({ at: new Date(), label: 'Finished' });
 
@@ -1333,7 +1414,9 @@ router.post('/runs/:id/approve', authenticateToken, async (req: Request, res: Re
         $set: {
           'agentRuns.$.status': 'succeeded',
           'agentRuns.$.approved': true,
-          'agentRuns.$.analytics': { impressions: 0, likes: 0, comments: 0, shares: 0 }
+          'agentRuns.$.publishedPosts': publishedPosts,
+          'agentRuns.$.analytics': { impressions: 0, likes: 0, comments: 0, shares: 0 },
+          'agentRuns.$.analyticsByPlatform': {}
         },
         $push: { 'agentRuns.$.traces': { $each: traces } }
       }

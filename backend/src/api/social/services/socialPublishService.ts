@@ -61,14 +61,26 @@ async function postJson(url: string, body: any, headers: Record<string, string>)
   throw new Error(String(message));
 }
 
-async function publishTwitter(account: any, text: string) {
+export type PublishedPost = {
+  platform: string;
+  postId?: string;
+  url?: string;
+  label: string;
+  ok: boolean;
+};
+
+type PublishHit = { postId?: string; url?: string; label: string };
+
+async function publishTwitter(account: any, text: string): Promise<PublishHit> {
   const json = await postJson('https://api.twitter.com/2/tweets', { text }, {
     Authorization: `Bearer ${tokenFor(account)}`
   });
-  return json.data?.id ? `https://x.com/i/web/status/${json.data.id}` : 'Posted to X';
+  const postId = json.data?.id ? String(json.data.id) : undefined;
+  const url = postId ? `https://x.com/i/web/status/${postId}` : undefined;
+  return { postId, url, label: url || 'Posted to X' };
 }
 
-async function publishFacebook(account: any, text: string) {
+async function publishFacebook(account: any, text: string): Promise<PublishHit> {
   const token = tokenFor(account);
   const secret = config.social.facebook.appSecret;
   const params = new URLSearchParams({
@@ -82,10 +94,11 @@ async function publishFacebook(account: any, text: string) {
   );
   const json = await readGraphJson(res);
   if (!res.ok) throw new Error(json.error?.message || 'Facebook publish failed');
-  return json.id ? `Facebook post ${json.id}` : 'Posted to Facebook';
+  const postId = json.id ? String(json.id) : undefined;
+  return { postId, label: postId ? `Facebook post ${postId}` : 'Posted to Facebook' };
 }
 
-async function publishLinkedIn(account: any, text: string) {
+async function publishLinkedIn(account: any, text: string): Promise<PublishHit> {
   const token = tokenFor(account);
   const author = `urn:li:person:${account.accountId}`;
   const headers = {
@@ -107,7 +120,8 @@ async function publishLinkedIn(account: any, text: string) {
       lifecycleState: 'PUBLISHED',
       isReshareDisabledByAuthor: false
     }, headers);
-    return json.id ? `LinkedIn post ${json.id}` : 'Posted to LinkedIn';
+    const postId = json.id ? String(json.id) : undefined;
+    return { postId, label: postId ? `LinkedIn post ${postId}` : 'Posted to LinkedIn' };
   } catch (err: any) {
     if (/duplicate/i.test(String(err.message || ''))) throw err;
     const json = await postJson('https://api.linkedin.com/v2/ugcPosts', {
@@ -121,11 +135,12 @@ async function publishLinkedIn(account: any, text: string) {
       },
       visibility: { 'com.linkedin.ugc.MemberNetworkVisibility': 'PUBLIC' }
     }, { Authorization: `Bearer ${token}` });
-    return json.id ? `LinkedIn post ${json.id}` : 'Posted to LinkedIn';
+    const postId = json.id ? String(json.id) : undefined;
+    return { postId, label: postId ? `LinkedIn post ${postId}` : 'Posted to LinkedIn' };
   }
 }
 
-async function publishThreads(account: any, text: string) {
+async function publishThreads(account: any, text: string): Promise<PublishHit> {
   const token = tokenFor(account);
   const secret = config.social.threads.appSecret;
   const clipped = fitText(text, LIMITS.threads);
@@ -152,7 +167,8 @@ async function publishThreads(account: any, text: string) {
   );
   const publishedJson = await readGraphJson(published);
   if (!published.ok) throw new Error(publishedJson.error?.message || 'Threads publish failed');
-  return publishedJson.id ? `Threads post ${publishedJson.id}` : 'Posted to Threads';
+  const postId = publishedJson.id ? String(publishedJson.id) : undefined;
+  return { postId, label: postId ? `Threads post ${postId}` : 'Posted to Threads' };
 }
 
 export async function listConnectedPublishTargets(userId: string): Promise<Array<{ platform: string; handle: string }>> {
@@ -164,7 +180,11 @@ export async function listConnectedPublishTargets(userId: string): Promise<Array
     .map((item: any) => ({ platform: item.platform, handle: item.handle || item.accountId }));
 }
 
-export async function publishSocialPost(userId: string, text: string, platforms: string[]): Promise<string> {
+export async function publishSocialPostDetailed(
+  userId: string,
+  text: string,
+  platforms: string[]
+): Promise<{ summary: string; posts: PublishedPost[] }> {
   const body = String(text || '').trim();
   if (!body) throw new Error('Post text is empty');
   const user = await UserModel.findById(userId);
@@ -173,29 +193,51 @@ export async function publishSocialPost(userId: string, text: string, platforms:
     const key = String(item).toLowerCase();
     return key === 'x' ? 'twitter' : key;
   });
-  const results: string[] = [];
+  const posts: PublishedPost[] = [];
 
   for (const platform of wanted) {
     const account = accounts.find((item: any) => item.platform === platform && item.connected && item.accessTokenEnc);
     if (!account) {
-      results.push(`${platform}: not connected`);
+      posts.push({ platform, ok: false, label: `${platform}: not connected` });
       continue;
     }
     try {
-      if (platform === 'twitter') results.push(`X: ${await publishTwitter(account, fitText(body, LIMITS.twitter))}`);
-      else if (platform === 'facebook') results.push(`Facebook: ${await publishFacebook(account, body)}`);
-      else if (platform === 'linkedin') results.push(`LinkedIn: ${await publishLinkedIn(account, fitText(body, LIMITS.linkedin))}`);
-      else if (platform === 'threads') results.push(`Threads: ${await publishThreads(account, body)}`);
+      const posted = platform === 'twitter'
+        ? await publishTwitter(account, fitText(body, LIMITS.twitter))
+        : platform === 'facebook'
+          ? await publishFacebook(account, body)
+          : platform === 'linkedin'
+            ? await publishLinkedIn(account, fitText(body, LIMITS.linkedin))
+            : platform === 'threads'
+              ? await publishThreads(account, body)
+              : null;
+      if (!posted) {
+        posts.push({ platform, ok: false, label: `${platform}: not supported` });
+        continue;
+      }
+      const prefix = platform === 'twitter' ? 'X' : platform === 'facebook' ? 'Facebook' : platform === 'linkedin' ? 'LinkedIn' : 'Threads';
+      posts.push({
+        platform,
+        ok: true,
+        postId: posted.postId,
+        url: posted.url,
+        label: posted.label.startsWith(prefix) ? posted.label : `${prefix}: ${posted.label}`
+      });
     } catch (err: any) {
       const msg = String(err.message || '');
       if (/duplicate/i.test(msg)) {
-        results.push(`${platform}: already posted`);
+        posts.push({ platform, ok: false, label: `${platform}: already posted` });
         continue;
       }
       logger.warn(`[Social Publish] ${platform} failed: ${err.message}`);
-      results.push(`${platform}: could not post`);
+      posts.push({ platform, ok: false, label: `${platform}: could not post` });
     }
   }
 
-  return results.join('\n');
+  return { summary: posts.map((item) => item.label).join('\n'), posts };
+}
+
+export async function publishSocialPost(userId: string, text: string, platforms: string[]): Promise<string> {
+  const { summary } = await publishSocialPostDetailed(userId, text, platforms);
+  return summary;
 }

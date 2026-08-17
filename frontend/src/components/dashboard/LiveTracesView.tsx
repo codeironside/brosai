@@ -19,6 +19,7 @@ interface PostTrace {
   platforms?: string[];
   traces?: TraceItem[];
   analytics?: { impressions?: number; likes?: number; comments?: number; shares?: number };
+  analyticsByPlatform?: Record<string, { impressions?: number; likes?: number; comments?: number; shares?: number }>;
 }
 
 interface SocialAccount {
@@ -99,25 +100,40 @@ export const LiveTracesView: React.FC = () => {
     setAccounts(Array.isArray(json.data.socialAccounts) ? json.data.socialAccounts : []);
   }, [authenticatedFetch]);
 
+  const refreshReach = useCallback(async () => {
+    try {
+      await authenticatedFetch('/api/auth/post-analytics/refresh', { method: 'POST' });
+    } catch {
+      /* keep last cached numbers */
+    }
+    await load();
+  }, [authenticatedFetch, load]);
+
   useEffect(() => {
     let mounted = true;
     const boot = async () => {
       try {
         setLoading(true);
-        await load();
+        await refreshReach();
       } finally {
         if (mounted) setLoading(false);
       }
     };
     boot();
     const timer = window.setInterval(() => {
-      load().catch(() => undefined);
-    }, 15000);
+      if (document.visibilityState !== 'visible') return;
+      refreshReach().catch(() => undefined);
+    }, 60_000);
+    const onVisible = () => {
+      if (document.visibilityState === 'visible') refreshReach().catch(() => undefined);
+    };
+    document.addEventListener('visibilitychange', onVisible);
     return () => {
       mounted = false;
       window.clearInterval(timer);
+      document.removeEventListener('visibilitychange', onVisible);
     };
-  }, [load]);
+  }, [refreshReach]);
 
   const grouped = useMemo(() => {
     const fromAccounts = accounts.filter((item) => !HIDDEN.has(item.platform)).map((item) => item.platform);
@@ -127,12 +143,15 @@ export const LiveTracesView: React.FC = () => {
     return platforms.map((platform) => {
       const account = accounts.find((item) => item.platform === platform);
       const items = posts.filter((post) => (post.platforms || []).includes(platform));
-      const totals = items.reduce((sum, post) => ({
-        impressions: sum.impressions + Number(post.analytics?.impressions || 0),
-        likes: sum.likes + Number(post.analytics?.likes || 0),
-        comments: sum.comments + Number(post.analytics?.comments || 0),
-        shares: sum.shares + Number(post.analytics?.shares || 0)
-      }), { impressions: 0, likes: 0, comments: 0, shares: 0 });
+      const totals = items.reduce((sum, post) => {
+        const slice = post.analyticsByPlatform?.[platform] || (post.platforms?.length === 1 ? post.analytics : undefined);
+        return {
+          impressions: sum.impressions + Number(slice?.impressions || 0),
+          likes: sum.likes + Number(slice?.likes || 0),
+          comments: sum.comments + Number(slice?.comments || 0),
+          shares: sum.shares + Number(slice?.shares || 0)
+        };
+      }, { impressions: 0, likes: 0, comments: 0, shares: 0 });
       return {
         platform,
         label: account?.name || LABELS[platform] || platform,
@@ -225,7 +244,9 @@ export const LiveTracesView: React.FC = () => {
           </div>
 
           {pageItems.length ? pageItems.map((post) => {
-            const analytics = post.analytics || {};
+            const analytics = post.analyticsByPlatform?.[active.platform]
+              || (post.platforms?.length === 1 ? post.analytics : {})
+              || {};
             const traces = tracesForAccount(post.traces || [], active.platform);
             const pulse = glance(post.status, analytics);
             return (
