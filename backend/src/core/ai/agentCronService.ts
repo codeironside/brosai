@@ -94,7 +94,26 @@ async function tick(userId: string): Promise<void> {
 
     const { brandMemoryService } = await import('./brandMemoryService.js');
     const managerId = String(user.aiCron.managerId || '');
-    let draft: { text: string; platforms: string[]; managerName: string };
+
+    // If we already asked clarifying questions, wait until the user answers via Hire AI / Brand Brain
+    if (user.aiCron?.awaitingClarification && Array.isArray(user.aiCron?.pendingQuestions) && user.aiCron.pendingQuestions.length) {
+      logger.info(`AI cron paused for clarification (${userId}): ${user.aiCron.pendingQuestions.join(' | ')}`);
+      await setCron(userId, {
+        lastPhase: 'awaiting_clarification',
+        lastTickAt: new Date(),
+        nextDueAt: new Date(Date.now() + intervalMs)
+      });
+      return;
+    }
+
+    let draft: {
+      text: string;
+      platforms: string[];
+      managerName: string;
+      provider?: string;
+      needsClarification?: boolean;
+      questions?: string[];
+    };
     try {
       draft = await brandMemoryService.generateDryRunPost(userId, managerId);
     } catch (err: any) {
@@ -104,6 +123,48 @@ async function tick(userId: string): Promise<void> {
         lastTickAt: new Date(),
         nextDueAt: new Date(Date.now() + intervalMs)
       });
+      return;
+    }
+
+    if (draft.needsClarification && draft.questions?.length) {
+      const runId = `clarify_${Math.random().toString(36).slice(2, 8)}`;
+      await UserModel.updateOne(
+        { _id: userId },
+        {
+          $push: {
+            agentRuns: {
+              $each: [{
+                id: `run_${Date.now()}`,
+                runId,
+                agentName: draft.managerName,
+                status: 'awaiting',
+                toolsCount: 0,
+                latencyPercent: 10,
+                tokens: '—',
+                cost: '$0.00',
+                approvalMode: 'manual',
+                approved: false,
+                createdAt: new Date(),
+                draft: draft.questions!.map((q: string, i: number) => `${i + 1}. ${q}`).join('\n'),
+                platforms: draft.platforms,
+                note: 'Automation needs your answers before posting more',
+                traces: [trace('Paused automation — clarifying questions')],
+                analytics: { impressions: 0, likes: 0, comments: 0, shares: 0 }
+              }],
+              $position: 0,
+              $slice: 80
+            }
+          },
+          $set: {
+            'aiCron.awaitingClarification': true,
+            'aiCron.pendingQuestions': draft.questions,
+            'aiCron.lastPhase': 'awaiting_clarification',
+            'aiCron.lastTickAt': new Date(),
+            'aiCron.nextDueAt': new Date(Date.now() + intervalMs),
+            'aiCron.lastRunId': runId
+          }
+        }
+      );
       return;
     }
 
@@ -129,7 +190,10 @@ async function tick(userId: string): Promise<void> {
       draft: draft.text,
       platforms: draft.platforms,
       note: approval === 'manual' ? 'Cron draft — approve to publish' : 'Cron publishing',
-      traces: [trace('Cron drafted a post')],
+      traces: [
+        trace('Cron drafted a post'),
+        ...(draft.provider ? [trace(`LLM: ${draft.provider}`)] : [])
+      ],
       analytics: { impressions: 0, likes: 0, comments: 0, shares: 0 }
     };
 
@@ -142,7 +206,8 @@ async function tick(userId: string): Promise<void> {
           'aiCron.lastTickAt': new Date(),
           'aiCron.nextDueAt': nextDueAt,
           'aiCron.lastRunId': runId,
-          'aiCron.lastPhase': approval === 'auto' ? 'publishing' : 'idle'
+          'aiCron.lastPhase': approval === 'auto' ? 'publishing' : 'idle',
+          ...(draft.provider ? { 'aiCron.lastLlmProvider': draft.provider } : {})
         },
         $inc: { 'aiCron.tickCount': 1 }
       }

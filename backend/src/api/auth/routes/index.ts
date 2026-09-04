@@ -1086,6 +1086,26 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
       } catch (err: any) {
         logger.warn(`learnFromChat failed: ${err.message}`);
       }
+      try {
+        await brandMemoryService.contextualizeLongThread(userId, live.id, live.messages || [], live.title);
+      } catch (err: any) {
+        logger.warn(`contextualizeLongThread failed: ${err.message}`);
+      }
+      // Answering in Hire AI / Brand Brain clears the automation pause
+      try {
+        await UserModel.updateOne(
+          { _id: userId, 'aiCron.awaitingClarification': true },
+          {
+            $set: {
+              'aiCron.awaitingClarification': false,
+              'aiCron.pendingQuestions': [],
+              'aiCron.lastPhase': 'idle'
+            }
+          }
+        );
+      } catch {
+        /* ignore */
+      }
     }
 
     res.json({
