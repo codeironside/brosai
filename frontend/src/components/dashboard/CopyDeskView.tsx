@@ -17,13 +17,13 @@ export const CopyDeskView: React.FC = () => {
 
   return (
     <div className="space-y-4 sm:space-y-6">
-      <div className="p-4 sm:p-6 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl">
-        <div className="flex items-center gap-2 text-[11px] sm:text-xs font-semibold text-white/80 uppercase tracking-wider mb-1">
-          <PenLine className="w-4 h-4 text-white" />
-          <span>Write, then paste</span>
+      <div className="p-4 sm:p-6 rounded-2xl bg-white/10 backdrop-blur-lg border border-white/15 shadow-2xl">
+        <div className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/10 backdrop-blur-md border border-white/15 text-xs font-mono font-medium uppercase tracking-wider text-blue-300 mb-3">
+          <PenLine className="w-3.5 h-3.5 text-blue-400" />
+          <span>Creative studio</span>
         </div>
-        <h1 className="text-xl sm:text-2xl font-bold text-white tracking-tight drop-shadow">Copy Desk</h1>
-        <p className="text-xs sm:text-sm text-white/70 mt-1">
+        <h1 className="text-xl sm:text-2xl font-semibold text-white tracking-tight">Copy Desk</h1>
+        <p className="text-xs sm:text-sm text-white/80 mt-1 font-light">
           Pick one network, then chat with Gemma. Copy pastes the post exactly as it will appear there. Image is optional.
         </p>
         <div className="flex flex-wrap gap-2 mt-4">
@@ -35,11 +35,13 @@ export const CopyDeskView: React.FC = () => {
                 type="button"
                 onClick={() => setPlatform(item.id)}
                 className={`px-3 py-2 rounded-xl border text-left text-xs transition-all ${
-                  selected ? 'bg-white text-black border-white' : 'bg-white/10 text-white border-white/20 hover:bg-white/15'
+                  selected
+                    ? 'bg-white/20 text-white border-white/30 font-semibold shadow'
+                    : 'bg-white/10 text-white/80 border-white/15 hover:bg-white/15 hover:text-white'
                 }`}
               >
                 <div className="font-semibold">{item.label}</div>
-                <div className={selected ? 'text-black/60' : 'text-white/50'}>{item.hint}</div>
+                <div className={selected ? 'text-white/60' : 'text-white/50'}>{item.hint}</div>
               </button>
             );
           })}
@@ -47,14 +49,16 @@ export const CopyDeskView: React.FC = () => {
             type="button"
             onClick={() => setWantImage((value) => !value)}
             className={`px-3 py-2 rounded-xl border text-left text-xs transition-all ${
-              wantImage ? 'bg-white text-black border-white' : 'bg-white/10 text-white border-white/20 hover:bg-white/15'
+              wantImage
+                ? 'bg-white/20 text-white border-white/30 font-semibold shadow'
+                : 'bg-white/10 text-white/80 border-white/15 hover:bg-white/15 hover:text-white'
             }`}
           >
             <div className="font-semibold inline-flex items-center gap-1">
               <ImageIcon className="w-3.5 h-3.5" />
               Image
             </div>
-            <div className={wantImage ? 'text-black/60' : 'text-white/50'}>
+            <div className={wantImage ? 'text-white/60' : 'text-white/50'}>
               {wantImage ? 'On · generate a visual' : 'Off · caption only'}
             </div>
           </button>
