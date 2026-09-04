@@ -272,10 +272,21 @@ ${brandCard}
 
 RELEVANT MEMORY:
 ${memory}`;
-      const rawReply = await gemmaService.generateCompletion(userMessage, system, recentHistory, {
-        temperature: 0.7,
-        maxTokens: wanted[0] === 'twitter' || wanted[0] === 'threads' ? 220 : 700
-      });
+      const rawReply = await (async () => {
+        try {
+          return await gemmaService.generateCompletion(userMessage, system, recentHistory, {
+            temperature: 0.7,
+            maxTokens: wanted[0] === 'twitter' || wanted[0] === 'threads' ? 220 : 700
+          });
+        } catch (err: any) {
+          logger.warn(`Gemma composer failed (${err.message}) — falling back to LLM adapter`);
+          const { llmCompleteText } = await import('./llmAdapter.js');
+          return llmCompleteText(userMessage, system, recentHistory, {
+            temperature: 0.7,
+            maxTokens: wanted[0] === 'twitter' || wanted[0] === 'threads' ? 220 : 700
+          });
+        }
+      })();
       const { extractComposerPost, fitToLimit } = await import('./composerPost.js');
       const reply = fitToLimit(
         extractComposerPost(rawReply, target.limit, wanted[0]) || rawReply.trim(),
@@ -337,10 +348,20 @@ ${memory}
 OTHER CHATS (titles and latest user notes):
 ${otherChats}`;
 
+    const pending = Array.isArray((dbUser as any).aiCron?.pendingQuestions)
+      ? (dbUser as any).aiCron.pendingQuestions.filter(Boolean)
+      : [];
+    const systemWithQuestions = pending.length
+      ? `${system}
+
+OPEN QUESTIONS FROM AUTOMATION (ask these naturally if still unanswered, then continue helping):
+${pending.map((q: string, i: number) => `${i + 1}. ${q}`).join('\n')}`
+      : system;
+
     const { openAIService } = await import('./openaiService.js');
     const result = await openAIService.generateWithTools({
       prompt: userMessage,
-      systemInstruction: system,
+      systemInstruction: systemWithQuestions,
       history: recentHistory,
       executeTool: async (name, args) => {
         if (name === 'search_web') {
@@ -403,7 +424,14 @@ ${otherChats}`;
     return { reply: result.reply, sources, usedWeb: result.usedWeb };
   }
 
-  async generateDryRunPost(userId: string, managerId?: string): Promise<{ text: string; platforms: string[]; managerName: string }> {
+  async generateDryRunPost(userId: string, managerId?: string): Promise<{
+    text: string;
+    platforms: string[];
+    managerName: string;
+    provider?: string;
+    needsClarification?: boolean;
+    questions?: string[];
+  }> {
     const dbUser = await UserModel.findById(userId);
     if (!dbUser) throw new Error('User not found');
     const { assertReadyToRun, listManagers, activeManager } = await import('../../api/auth/services/workspaceProfiles.js');
@@ -417,12 +445,36 @@ ${otherChats}`;
     const previous = (dbUser.agentRuns || [])
       .map((item: any) => String(item.draft || '').trim())
       .filter(Boolean)
-      .slice(0, 6);
+      .slice(0, 8);
+    const tickCount = Number(dbUser.aiCron?.tickCount || 0);
+    const brandCard = this.formatBrandCard(dbUser, { managerId: manager.id, brandId: manager.brandId });
+    const brains = listBrandBrains(dbUser);
+    const brain = brains.find((item: any) => item.id === manager.brandId) || brains[0];
+
+    // When automation has run a while, pause and ask clarifying questions if brand context is thin
+    const gaps: string[] = [];
+    if (!brain?.targetAudience) gaps.push('Who is the primary audience for the next few posts?');
+    if (!brain?.voiceTone && !manager.personality) gaps.push('What tone should we lean into this week (bold, calm, educational)?');
+    if (!Array.isArray(brain?.topics) || brain.topics.length < 2) gaps.push('Name 2–3 topics we should cover next.');
+    if (tickCount > 0 && tickCount % 8 === 0 && gaps.length) {
+      return {
+        text: '',
+        platforms,
+        managerName: manager.name || 'Hired AI',
+        needsClarification: true,
+        questions: gaps.slice(0, 3)
+      };
+    }
+
+    // Every 6 ticks, refresh a short automation context summary into the knowledge base
+    if (tickCount > 0 && tickCount % 6 === 0) {
+      await this.saveAutomationContext(userId, manager.id, previous);
+    }
+
     const angles = ['a sharp question', 'a concrete customer story', 'one surprising stat', 'a short how-to', 'a bold claim plus proof', 'a call to action'];
     const angle = angles[Math.floor(Math.random() * angles.length)];
-    const brandCard = this.formatBrandCard(dbUser, { managerId: manager.id, brandId: manager.brandId });
-    const { openAIService } = await import('./openaiService.js');
-    const text = (await openAIService.generateCompletion(
+    const { llmComplete } = await import('./llmAdapter.js');
+    const result = await llmComplete(
       [
         `Write one ready-to-publish social post using ${angle}.`,
         'Keep it under 450 characters so it fits Threads.',
@@ -432,9 +484,120 @@ ${otherChats}`;
       `You are ${manager.name || 'the hired AI'}. Write in this brand voice only. Vary the hook, structure, and wording every time.\n\n${brandCard}`,
       [],
       { temperature: 1.05, maxTokens: 220 }
-    )).trim().replace(/^["']|["']$/g, '');
+    );
+    const text = result.content.trim().replace(/^["']|["']$/g, '');
     if (!text) throw new Error('empty');
-    return { text, platforms, managerName: manager.name || 'Hired AI' };
+    return { text, platforms, managerName: manager.name || 'Hired AI', provider: result.provider };
+  }
+
+  /**
+   * Persist a compact summary of recent automation drafts so long-running crons stay contextual.
+   */
+  async saveAutomationContext(userId: string, managerId: string, drafts: string[]): Promise<void> {
+    if (!drafts.length) return;
+    try {
+      const { llmCompleteText } = await import('./llmAdapter.js');
+      const summary = await llmCompleteText(
+        `Summarize these recent social drafts into 4–6 durable bullet facts for future posting (themes, offers, tone, what to avoid repeating).\n\n${drafts.map((d, i) => `${i + 1}. ${d}`).join('\n')}`,
+        'You compress automation history into brand memory. No fluff. Plain bullets only.',
+        [],
+        { temperature: 0.3, maxTokens: 350 }
+      );
+      const content = String(summary || '').trim();
+      if (!content) return;
+      const embedding = await vectorStoreService.generateEmbedding(content);
+      const dbUser = await UserModel.findById(userId);
+      if (!dbUser) return;
+      dbUser.knowledgeBase = dbUser.knowledgeBase || [];
+      const id = `automation_ctx_${managerId || 'default'}`;
+      dbUser.knowledgeBase = dbUser.knowledgeBase.filter((doc: any) => doc.id !== id);
+      dbUser.knowledgeBase.unshift({
+        id,
+        title: 'Automation context',
+        content,
+        category: 'Automation',
+        sourceType: 'automation_context',
+        parentId: managerId || 'automation',
+        embedding,
+        createdAt: new Date()
+      });
+      dbUser.markModified('knowledgeBase');
+      await dbUser.save();
+      await UserModel.updateOne(
+        { _id: userId },
+        { $set: { 'aiCron.contextSummarizedAt': new Date() } }
+      );
+      logger.info(`[Brand Memory] Saved automation context for ${userId}`);
+    } catch (err: any) {
+      logger.warn(`Automation context save skipped: ${err.message}`);
+    }
+  }
+
+  /**
+   * When a Hire AI / Brand Brain thread gets long, compress older turns into knowledgeBase.
+   */
+  async contextualizeLongThread(
+    userId: string,
+    threadId: string,
+    messages: Array<{ role: string; content: string }>,
+    threadTitle = ''
+  ): Promise<void> {
+    if (!Array.isArray(messages) || messages.length < 28) return;
+    try {
+      const slice = messages.slice(0, -8);
+      const transcript = slice
+        .map((item) => `${item.role === 'assistant' ? 'AI' : 'User'}: ${String(item.content || '').slice(0, 400)}`)
+        .join('\n')
+        .slice(0, 6000);
+      const { llmCompleteText } = await import('./llmAdapter.js');
+      const summary = await llmCompleteText(
+        `Compress this long chat into durable brand/context notes and list any open questions the AI should ask the user next.\nReturn JSON only: {"facts":["..."],"questions":["..."]}\n\nTITLE: ${threadTitle || 'Chat'}\n\n${transcript}`,
+        'You maintain long-running chat memory. Never invent facts. JSON only.',
+        [],
+        { temperature: 0.2, maxTokens: 500 }
+      );
+      const match = String(summary || '').match(/\{[\s\S]*\}/);
+      if (!match) return;
+      const parsed = JSON.parse(match[0]);
+      const facts = Array.isArray(parsed.facts) ? parsed.facts.map((f: unknown) => String(f || '').trim()).filter((f: string) => f.length > 12) : [];
+      const questions = Array.isArray(parsed.questions)
+        ? parsed.questions.map((q: unknown) => String(q || '').trim()).filter((q: string) => q.length > 8).slice(0, 3)
+        : [];
+      const dbUser = await UserModel.findById(userId);
+      if (!dbUser) return;
+      dbUser.knowledgeBase = dbUser.knowledgeBase || [];
+      const parentId = this.chatMemoryParentId(threadId);
+      for (const fact of facts.slice(0, 6)) {
+        const embedding = await vectorStoreService.generateEmbedding(fact);
+        dbUser.knowledgeBase.push({
+          id: `chatctx_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          title: threadTitle ? `Long-chat context: ${threadTitle}` : 'Long-chat context',
+          content: fact,
+          category: 'Chat training',
+          sourceType: 'chat_memory',
+          parentId,
+          embedding,
+          createdAt: new Date()
+        });
+      }
+      if (questions.length) {
+        await UserModel.updateOne(
+          { _id: userId },
+          {
+            $set: {
+              'aiCron.pendingQuestions': questions,
+              'aiCron.awaitingClarification': true
+            }
+          }
+        );
+      }
+      dbUser.knowledgeBase = await this.pruneChatTurns(dbUser.knowledgeBase);
+      dbUser.markModified('knowledgeBase');
+      await dbUser.save();
+      logger.info(`[Brand Memory] Contextualized long thread ${threadId} (${facts.length} facts, ${questions.length} questions)`);
+    } catch (err: any) {
+      logger.warn(`Long-thread contextualize skipped: ${err.message}`);
+    }
   }
 
   chatMemoryParentId(threadId: string) {

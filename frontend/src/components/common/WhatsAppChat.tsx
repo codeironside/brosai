@@ -476,15 +476,15 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
   };
 
   return (
-    <div className={`rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl overflow-hidden flex h-[min(70vh,560px)] min-h-[320px] ${className}`}>
+    <div className={`rounded-2xl bg-white/10 backdrop-blur-lg border border-white/15 shadow-2xl overflow-hidden flex h-[min(70vh,560px)] min-h-[320px] ${className}`}>
       {sidebarOpen && (
-        <aside className="w-[42%] sm:w-56 md:w-64 shrink-0 min-h-0 border-r border-white/20 bg-white/10 backdrop-blur-xl flex flex-col p-3 space-y-3">
+        <aside className="w-[42%] sm:w-56 md:w-64 shrink-0 min-h-0 border-r border-white/15 bg-white/10 backdrop-blur-lg flex flex-col p-3 space-y-3">
           <div className="flex items-center justify-between gap-2 px-1">
             <span className="text-xs font-semibold text-white">History</span>
             <button
               type="button"
               onClick={newChat}
-              className="px-2.5 py-1 rounded-full bg-white/15 hover:bg-white/25 text-[11px] text-white inline-flex items-center gap-1 border border-white/20 backdrop-blur-md"
+              className="px-2.5 py-1 rounded-full bg-white/10 hover:bg-white/20 text-[11px] text-white inline-flex items-center gap-1 border border-white/15 backdrop-blur-md"
             >
               <MessageSquarePlus className="w-3.5 h-3.5" />
               New
@@ -503,7 +503,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
                   onClick={() => openThread(item.id)}
                   className={`w-full text-left px-3 py-2.5 rounded-xl group transition-all backdrop-blur-md ${
                     active
-                      ? 'bg-white/20 text-white border border-white/30 font-semibold shadow-lg'
+                      ? 'bg-white/20 text-white border border-white/30 font-semibold shadow'
                       : 'bg-white/10 text-white/80 hover:bg-white/15 hover:text-white border border-white/15'
                   }`}
                 >
@@ -546,7 +546,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
       )}
 
       <div className="flex-1 min-w-0 flex flex-col">
-        <div className="px-3 sm:px-4 py-3 border-b border-white/20 bg-white/5 backdrop-blur-xl flex items-center justify-between gap-3 shrink-0">
+        <div className="px-3 sm:px-4 py-3 border-b border-white/15 bg-white/5 backdrop-blur-lg flex items-center justify-between gap-3 shrink-0">
           <div className="flex items-center gap-2 min-w-0">
             <button
               type="button"
@@ -577,10 +577,10 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
             return (
               <div key={item.id || `${item.role}-${idx}`} className={`flex ${mine ? 'justify-end' : 'justify-start'}`}>
                 <div
-                  className={`relative max-w-[88%] sm:max-w-[75%] px-3 py-2 rounded-2xl border backdrop-blur-xl ${
+                  className={`relative max-w-[88%] sm:max-w-[75%] px-3 py-2 rounded-2xl border backdrop-blur-lg ${
                     mine
-                      ? 'bg-white/15 border-white/25 text-white rounded-br-md'
-                      : 'bg-white/10 border-white/20 text-white rounded-bl-md'
+                      ? 'bg-white/15 border-white/20 text-white rounded-br-md'
+                      : 'bg-white/10 border-white/15 text-white rounded-bl-md'
                   }`}
                 >
                   {canEdit && (
@@ -635,7 +635,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
                                 /* ignore clipboard denial */
                               }
                             }}
-                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white text-black text-[11px] font-medium"
+                            className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg btn-cta-gradient text-white text-[11px] font-medium shadow"
                             aria-label="Copy post"
                           >
                             {copiedId === (item.id || `${idx}`) ? <Check className="w-3.5 h-3.5" /> : <Copy className="w-3.5 h-3.5" />}
@@ -657,7 +657,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
           })}
           {sending && (
             <div className="flex justify-start">
-              <div className="bg-white/10 backdrop-blur-xl border border-white/20 text-white/70 px-3 py-2 rounded-2xl rounded-bl-md inline-flex items-center gap-2">
+              <div className="bg-white/10 backdrop-blur-lg border border-white/15 text-white/70 px-3 py-2 rounded-2xl rounded-bl-md inline-flex items-center gap-2">
                 <span className="text-[11px]">thinking</span>
                 <span className="inline-flex items-center gap-1" aria-hidden="true">
                   <span className="wa-thinking-dot" />
@@ -669,7 +669,7 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
           )}
         </div>
 
-        <div className="shrink-0 p-2 sm:p-3 border-t border-white/20 bg-white/10 backdrop-blur-xl">
+        <div className="shrink-0 p-2 sm:p-3 border-t border-white/15 bg-white/10 backdrop-blur-lg">
           {learnedNote && (
             <p className="text-[10px] text-white/55 px-1 pb-1.5">{learnedNote}</p>
           )}
@@ -692,13 +692,13 @@ export const WhatsAppChat: React.FC<WhatsAppChatProps> = ({
               void send(e);
             }}
             placeholder={replaceLast ? 'Edit your last prompt…' : messages.length ? 'Reply…' : placeholder}
-            className="flex-1 min-h-[40px] max-h-28 resize-none px-3 py-2.5 rounded-2xl bg-zinc-950 border border-white/20 text-sm text-white focus:outline-none focus:border-white"
+            className="flex-1 min-h-[40px] max-h-28 resize-none px-3 py-2.5 rounded-2xl bg-black/40 border border-white/15 text-sm text-white placeholder-white/40 focus:outline-none focus:border-white/30"
           />
           <button
             type="button"
             disabled={sending || !input.trim()}
             onClick={() => void send()}
-            className="h-10 w-10 sm:h-11 sm:w-11 rounded-full bg-white text-black flex items-center justify-center shrink-0 disabled:opacity-40"
+            className="h-10 w-10 sm:h-11 sm:w-11 rounded-full btn-cta-gradient text-white flex items-center justify-center shrink-0 disabled:opacity-40 shadow"
             aria-label="Send"
           >
             <Send className="w-4 h-4" />

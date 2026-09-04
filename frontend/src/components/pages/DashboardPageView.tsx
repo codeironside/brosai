@@ -53,7 +53,7 @@ export const DashboardPageView: React.FC = () => {
   return (
     <div className="relative min-h-screen w-full bg-black text-white font-sans flex flex-col lg:flex-row overflow-x-hidden pt-16 sm:pt-20">
       <HLSVideo src={dashboardVideoUrl} />
-      <div className="absolute inset-0 bg-black/40 backdrop-blur-sm z-0 pointer-events-none" />
+      <div className="absolute inset-0 bg-gradient-to-t from-black via-black/20 to-black/60 z-0 pointer-events-none" />
 
       <div className="lg:hidden relative z-20 w-full px-3 py-2 border-b border-white/15 bg-black/50 backdrop-blur-2xl flex items-center gap-2 overflow-x-auto no-scrollbar shrink-0">
         {navItems.map((item) => {
@@ -65,8 +65,8 @@ export const DashboardPageView: React.FC = () => {
               onClick={() => setActiveTab(item.id as typeof activeTab)}
               className={`px-3 py-1.5 rounded-full text-xs font-medium flex items-center gap-1.5 whitespace-nowrap transition-all ${
                 isActive
-                  ? 'bg-white text-black font-semibold shadow-md'
-                  : 'bg-white/10 text-white/80 hover:bg-white/20'
+                  ? 'bg-white/20 text-white font-semibold shadow border border-white/30'
+                  : 'bg-white/10 text-white/80 hover:bg-white/15 hover:text-white border border-transparent'
               }`}
             >
               <Icon className="w-3.5 h-3.5" />

@@ -114,7 +114,11 @@ const UserSchema = new mongoose.Schema({
     lastPhase: { type: String, default: 'idle' },
     lastRunId: String,
     shutdownAt: Date,
-    tickCount: { type: Number, default: 0 }
+    tickCount: { type: Number, default: 0 },
+    lastLlmProvider: String,
+    contextSummarizedAt: Date,
+    pendingQuestions: [String],
+    awaitingClarification: { type: Boolean, default: false }
   },
 
   agentRuns: [
