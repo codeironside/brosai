@@ -1,0 +1,33 @@
+{
+  "expo": {
+    "name": "Vamvamvam AI",
+    "slug": "vamvamvam-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "vamvamvam",
+    "backgroundColor": "#111111",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vamvamvam.ai"
+    },
+    "android": {
+      "package": "com.vamvamvam.ai",
+      "backgroundColor": "#111111"
+    },
+    "plugins": [
+      "expo-video",
+      "expo-font",
+      "expo-status-bar",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#111111",
+          "image": "./assets/splash.png",
+          "resizeMode": "contain",
+          "imageWidth": 1
+        }
+      ]
+    ]
+  }
+}
