@@ -22,6 +22,15 @@ import {
   syncBrandBrains,
   syncManagers
 } from '../services/workspaceProfiles.js';
+import {
+  completeMobileGoogleCallback,
+  createMobileGoogleAuthUrl,
+  exchangeMobileTicket,
+  mobileAuthDoneHtml,
+  pollMobileSession,
+  resolveMobileCallbackUrl,
+  sanitizeAppRedirect,
+} from '../services/mobileGoogleAuthService.js';
 
 
 const router = Router();
@@ -29,6 +38,114 @@ const router = Router();
 // Authentication Routes
 router.post('/google', loginController);
 router.post('/logout', logoutController);
+
+// Mobile Google OAuth (HTTPS callback — required by Google; Expo custom schemes are blocked)
+router.get('/google/mobile/start', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const callbackUrl = resolveMobileCallbackUrl(req.get('host') || undefined, req.protocol);
+    const defaultDone = callbackUrl.replace(/\/callback\/?$/, '/done');
+    const appRedirect = sanitizeAppRedirect(
+      String(req.query.app_redirect || defaultDone),
+      callbackUrl,
+    );
+    const clientSession = String(req.query.client_session || '').trim();
+    const started = await createMobileGoogleAuthUrl({
+      appRedirect,
+      callbackUrl,
+      clientSession,
+    });
+    res.redirect(started.url);
+  } catch (err: any) {
+    logger.error(`Mobile Google start failed: ${err.message}`);
+    res.status(500).send(`Google sign-in is not configured: ${err.message}`);
+  }
+});
+
+router.get('/google/mobile/callback', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const callbackUrl = resolveMobileCallbackUrl(req.get('host') || undefined, req.protocol);
+    const result = await completeMobileGoogleCallback({
+      code: typeof req.query.code === 'string' ? req.query.code : undefined,
+      state: typeof req.query.state === 'string' ? req.query.state : undefined,
+      error: typeof req.query.error === 'string' ? req.query.error : undefined,
+      callbackUrl,
+    });
+    const done = new URL(callbackUrl.replace(/\/callback\/?$/, '/done'));
+    done.searchParams.set('ticket', result.ticket);
+    if (result.clientSession) done.searchParams.set('client_session', result.clientSession);
+    if (result.appRedirect) done.searchParams.set('app_redirect', result.appRedirect);
+    res.redirect(done.toString());
+  } catch (err: any) {
+    logger.error(`Mobile Google callback failed: ${err.message}`);
+    const callbackUrl = resolveMobileCallbackUrl(req.get('host') || undefined, req.protocol);
+    const done = new URL(callbackUrl.replace(/\/callback\/?$/, '/done'));
+    done.searchParams.set('error', err.message || 'Google sign-in failed');
+    res.redirect(done.toString());
+  }
+});
+
+router.get('/google/mobile/done', async (req: Request, res: Response): Promise<void> => {
+  const ticket = typeof req.query.ticket === 'string' ? req.query.ticket : '';
+  const error = typeof req.query.error === 'string' ? req.query.error : '';
+  if (error) {
+    res.status(400).type('html').send('<body style="background:#000"></body>');
+    return;
+  }
+  if (!ticket) {
+    res.status(400).type('html').send('<body style="background:#000"></body>');
+    return;
+  }
+
+  let deepLink = typeof req.query.app_redirect === 'string' ? String(req.query.app_redirect).trim() : '';
+  if (!/^exp:/i.test(deepLink) && !/^vamvamvam:/i.test(deepLink)) {
+    deepLink = 'vamvamvam://auth';
+  }
+
+  let target: string;
+  try {
+    const url = new URL(deepLink);
+    url.searchParams.set('ticket', ticket);
+    target = url.toString();
+  } catch {
+    target = `vamvamvam://auth?ticket=${encodeURIComponent(ticket)}`;
+  }
+
+  res.setHeader('Content-Type', 'text/html; charset=utf-8');
+  res.setHeader('Cache-Control', 'no-store');
+  res.send(mobileAuthDoneHtml(target, ticket));
+});
+
+router.get('/google/mobile/poll', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const clientSession = String(req.query.client_session || '').trim();
+    if (!clientSession) {
+      res.status(400).json({ success: false, error: 'client_session is required' });
+      return;
+    }
+    const found = await pollMobileSession(clientSession);
+    if (!found) {
+      res.status(204).send();
+      return;
+    }
+    res.json({ success: true, data: found });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Poll failed' });
+  }
+});
+
+router.post('/google/mobile/exchange', async (req: Request, res: Response): Promise<void> => {
+  try {
+    const ticket = String(req.body?.ticket || '').trim();
+    if (!ticket) {
+      res.status(400).json({ success: false, error: 'ticket is required' });
+      return;
+    }
+    const data = await exchangeMobileTicket(ticket);
+    res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(401).json({ success: false, error: err.message || 'Ticket exchange failed' });
+  }
+});
 
 // Token Refresh Route
 router.post('/refresh', async (req: Request, res: Response): Promise<void> => {
@@ -80,6 +197,60 @@ router.get('/me', authenticateToken, async (req: Request, res: Response): Promis
     });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// Mobile push token registration (Expo Push Token)
+router.post('/push-token', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const token = String(req.body?.token || '').trim();
+    const platform = String(req.body?.platform || 'unknown').trim().slice(0, 32) || 'unknown';
+    if (!token || token.length < 20) {
+      res.status(400).json({ success: false, error: 'Valid push token is required' });
+      return;
+    }
+
+    await UserModel.updateOne({ _id: userId }, { $pull: { pushTokens: { token } } });
+    await UserModel.updateOne(
+      { _id: userId },
+      {
+        $push: {
+          pushTokens: {
+            $each: [{ token, platform, updatedAt: new Date() }],
+            $slice: -8
+          }
+        },
+        $set: { 'notificationSettings.push': true }
+      }
+    );
+
+    res.json({ success: true, message: 'Push token saved' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Could not save push token' });
+  }
+});
+
+router.delete('/push-token', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const token = String(req.body?.token || req.query?.token || '').trim();
+    if (!token) {
+      res.status(400).json({ success: false, error: 'token is required' });
+      return;
+    }
+    await UserModel.updateOne({ _id: userId }, { $pull: { pushTokens: { token } } });
+    res.json({ success: true, message: 'Push token removed' });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message || 'Could not remove push token' });
   }
 });
 

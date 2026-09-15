@@ -1,0 +1,57 @@
+{
+  "expo": {
+    "name": "Vamvamvam AI",
+    "slug": "vamvamvam-ai",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "userInterfaceStyle": "dark",
+    "scheme": "vamvamvam",
+    "backgroundColor": "#111111",
+    "icon": "./assets/icon.png",
+    "ios": {
+      "supportsTablet": false,
+      "bundleIdentifier": "com.vamvamvam.ai",
+      "icon": "./assets/icon.png",
+      "infoPlist": {
+        "UIBackgroundModes": ["remote-notification"]
+      }
+    },
+    "android": {
+      "package": "com.vamvamvam.ai",
+      "backgroundColor": "#111111",
+      "adaptiveIcon": {
+        "foregroundImage": "./assets/adaptive-icon.png",
+        "backgroundColor": "#111111"
+      }
+    },
+    "plugins": [
+      "expo-video",
+      "expo-font",
+      "expo-status-bar",
+      "expo-secure-store",
+      "expo-web-browser",
+      [
+        "expo-splash-screen",
+        {
+          "backgroundColor": "#111111",
+          "image": "./assets/splash-icon.png",
+          "resizeMode": "contain",
+          "imageWidth": 180
+        }
+      ],
+      [
+        "expo-notifications",
+        {
+          "color": "#7dd3fc",
+          "defaultChannel": "default",
+          "icon": "./assets/icon.png"
+        }
+      ]
+    ],
+    "extra": {
+      "eas": {
+        "projectId": ""
+      }
+    }
+  }
+}
