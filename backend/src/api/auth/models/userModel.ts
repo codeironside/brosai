@@ -182,10 +182,17 @@ const UserSchema = new mongoose.Schema({
   notificationSettings: {
     inApp: { type: Boolean, default: true },
     email: { type: Boolean, default: true },
+    push: { type: Boolean, default: true },
     whatsapp: { type: Boolean, default: false },
     whatsappNumber: { type: String, default: '' },
     frequency: { type: String, default: 'daily' }
   },
+
+  pushTokens: [{
+    token: { type: String, required: true },
+    platform: { type: String, default: 'unknown' },
+    updatedAt: { type: Date, default: Date.now }
+  }],
 
   createdAt: { type: Date, default: Date.now }
 });

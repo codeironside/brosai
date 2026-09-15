@@ -165,6 +165,12 @@ async function tick(userId: string): Promise<void> {
           }
         }
       );
+      const { notifyUser } = await import('../notifications/pushService.js');
+      await notifyUser(userId, {
+        title: 'Your AI needs you',
+        body: draft.questions[0] || 'Answer a few questions so automation can keep posting.',
+        data: { type: 'clarification', runId }
+      });
       return;
     }
 
@@ -212,6 +218,15 @@ async function tick(userId: string): Promise<void> {
         $inc: { 'aiCron.tickCount': 1 }
       }
     );
+
+    if (approval === 'manual') {
+      const { notifyUser } = await import('../notifications/pushService.js');
+      await notifyUser(userId, {
+        title: 'Draft ready for approval',
+        body: (draft.text || 'Your AI drafted a post.').slice(0, 140),
+        data: { type: 'approval', runId }
+      });
+    }
 
     if (approval === 'auto' && draft.text && draft.platforms.length && !shuttingDown) {
       const { publishSocialPostDetailed } = await import('../../api/social/services/socialPublishService.js');

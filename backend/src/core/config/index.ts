@@ -54,6 +54,16 @@ export const config = {
     clientEmail: process.env.FIREBASE_CLIENT_EMAIL || 'dev@brosai.iam.gserviceaccount.com',
     privateKey: (process.env.FIREBASE_PRIVATE_KEY || '').replace(/\\n/g, '\n'),
   },
+  google: {
+    clientId: process.env.GOOGLE_CLIENT_ID || '',
+    clientSecret: process.env.GOOGLE_CLIENT_SECRET || '',
+    /** Must be listed in Google Cloud → OAuth client → Authorized redirect URIs */
+    mobileCallbackUrl:
+      process.env.GOOGLE_MOBILE_CALLBACK_URL ||
+      (process.env.NODE_ENV === 'production'
+        ? 'https://api.vamvamvamai.com/api/auth/google/mobile/callback'
+        : ''),
+  },
   ai: {
     apiKey: process.env.AI_API_KEY || '',
     openaiApiKey: process.env.OPENAI_API_KEY || '',
