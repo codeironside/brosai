@@ -130,7 +130,18 @@ export const config = {
       clientSecret: process.env.YOUTUBE_CLIENT_SECRET || '',
       redirectUri: process.env.YOUTUBE_REDIRECT_URI || '',
     }
-  }
+  },
+  billing: {
+    /** Active default when AppSettings has no override — Super Admin can switch in dashboard */
+    defaultPaymentProvider: (process.env.PAYMENT_PROVIDER as 'monnify' | 'paystack') || 'monnify',
+    monnifyApiKey: process.env.MONNIFY_API_KEY || '',
+    monnifySecretKey: process.env.MONNIFY_SECRET_KEY || '',
+    monnifyContractCode: process.env.MONNIFY_CONTRACT_CODE || '',
+    monnifyBaseUrl: process.env.MONNIFY_BASE_URL || 'https://sandbox.monnify.com',
+    monnifyWebhookSecret: process.env.MONNIFY_WEBHOOK_SECRET || '',
+    paystackPublicKey: process.env.PAYSTACK_PUBLIC_KEY || '',
+    paystackSecretKey: process.env.PAYSTACK_SECRET_KEY || '',
+  },
 } as const;
 
 export type Config = typeof config;

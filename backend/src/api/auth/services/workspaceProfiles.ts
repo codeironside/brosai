@@ -51,30 +51,38 @@ export function listManagers(user: any): any[] {
 }
 
 export function listBrandBrains(user: any): any[] {
-  const list = Array.isArray(user?.brandBrains) ? user.brandBrains.filter((item: any) => item?.id || hasBrandContent(item)) : [];
+  const raw = Array.isArray(user?.brandBrains) ? user.brandBrains : [];
+  const list = raw
+    .filter((item: any) => item?.id || hasBrandContent(item))
+    .map((item: any) => toPlainBrand(item, Boolean(item?.isActive)));
   if (list.length) return list;
   if (hasBrandContent(user?.brandBrain)) {
-    return [{
-      id: user.brandBrain.id || newProfileId('brand'),
-      brandName: user.brandBrain.brandName || '',
-      industry: user.brandBrain.industry || '',
-      description: user.brandBrain.description || '',
-      productsServices: user.brandBrain.productsServices || '',
-      targetAudience: user.brandBrain.targetAudience || '',
-      goals: user.brandBrain.goals || [],
-      topics: user.brandBrain.topics || [],
-      voiceTone: user.brandBrain.voiceTone || '',
-      differentiator: user.brandBrain.differentiator || '',
-      contentPillars: user.brandBrain.contentPillars || [],
-      restrictions: user.brandBrain.restrictions || [],
-      website: user.brandBrain.website || '',
-      customNotes: user.brandBrain.customNotes || '',
-      isActive: true,
-      createdAt: user.brandBrain.createdAt || new Date(),
-      updatedAt: user.brandBrain.updatedAt || new Date()
-    }];
+    return [toPlainBrand(user.brandBrain, true)];
   }
   return [];
+}
+
+function toPlainBrand(brain: any, isActiveFallback = false) {
+  const src = brain?.toObject ? brain.toObject() : brain || {};
+  return {
+    id: src.id || newProfileId('brand'),
+    brandName: src.brandName || '',
+    industry: src.industry || '',
+    description: src.description || '',
+    productsServices: src.productsServices || '',
+    targetAudience: src.targetAudience || '',
+    goals: Array.isArray(src.goals) ? src.goals : [],
+    topics: Array.isArray(src.topics) ? src.topics : [],
+    voiceTone: src.voiceTone || '',
+    differentiator: src.differentiator || '',
+    contentPillars: Array.isArray(src.contentPillars) ? src.contentPillars : [],
+    restrictions: Array.isArray(src.restrictions) ? src.restrictions : [],
+    website: src.website || '',
+    customNotes: src.customNotes || '',
+    isActive: src.isActive !== undefined ? Boolean(src.isActive) : isActiveFallback,
+    createdAt: src.createdAt || null,
+    updatedAt: src.updatedAt || null,
+  };
 }
 
 export function activeManager(list: any[]): any | null {
@@ -99,9 +107,26 @@ export function plain(doc: any): any {
 }
 
 export function connectedPlatforms(user: any): string[] {
+  return Array.from(
+    new Set(
+      (user?.socialAccounts || [])
+        .filter((acc: any) => acc?.connected && acc?.platform && acc?.accessTokenEnc)
+        .map((acc: any) => String(acc.platform)),
+    ),
+  );
+}
+
+export function connectedAccountIds(user: any): string[] {
   return (user?.socialAccounts || [])
-    .filter((acc: any) => acc?.connected && acc?.platform)
-    .map((acc: any) => String(acc.platform));
+    .filter((acc: any) => acc?.connected && acc?.accessTokenEnc)
+    .map((acc: any) => {
+      const platform = String(acc.platform || '');
+      const id = String(acc.accountId || '').trim();
+      if (id) return `${platform}:${id}`;
+      const handle = String(acc.handle || '').trim().toLowerCase();
+      return handle ? `${platform}:handle:${handle}` : '';
+    })
+    .filter(Boolean);
 }
 
 export function assertReadyToRun(user: any, manager: any): void {
@@ -113,15 +138,20 @@ export function assertReadyToRun(user: any, manager: any): void {
   if (!brandId || !brands.some((item: any) => item.id === brandId)) {
     throw new Error('Link this AI to a Brand Brain in Hire Your AI before it can run.');
   }
-  const linked = connectedPlatforms(user);
-  if (!linked.length) {
+  const linkedPlatforms = connectedPlatforms(user);
+  const linkedIds = connectedAccountIds(user);
+  if (!linkedPlatforms.length) {
     throw new Error('Connect at least one social media account before starting an AI run.');
   }
   const postTo = Array.isArray(manager?.postTo) ? manager.postTo.filter(Boolean) : [];
   if (!postTo.length) {
     throw new Error('Choose where this AI should post in Hire Your AI.');
   }
-  const allowed = postTo.filter((platform: string) => linked.includes(platform));
+  const allowed = postTo.filter((dest: string) => {
+    if (linkedIds.includes(dest) || linkedIds.some((id) => id.endsWith(`:${dest}`) || id === dest)) return true;
+    const platform = dest.toLowerCase() === 'x' ? 'twitter' : dest.toLowerCase();
+    return linkedPlatforms.includes(platform);
+  });
   if (!allowed.length) {
     throw new Error('The posting destinations for this AI are not connected. Connect those accounts, then try again.');
   }

@@ -31,6 +31,7 @@ import {
   resolveMobileCallbackUrl,
   sanitizeAppRedirect,
 } from '../services/mobileGoogleAuthService.js';
+import { isExplicitAdminEmail } from '../services/adminEmails.js';
 
 
 const router = Router();
@@ -49,10 +50,12 @@ router.get('/google/mobile/start', async (req: Request, res: Response): Promise<
       callbackUrl,
     );
     const clientSession = String(req.query.client_session || '').trim();
+    const referralCode = String(req.query.ref || req.query.referralCode || '').trim();
     const started = await createMobileGoogleAuthUrl({
       appRedirect,
       callbackUrl,
       clientSession,
+      referralCode,
     });
     res.redirect(started.url);
   } catch (err: any) {
@@ -174,6 +177,10 @@ router.get('/me', authenticateToken, async (req: Request, res: Response): Promis
       });
       return;
     }
+    if (isExplicitAdminEmail(dbUser.email) && dbUser.role !== 'admin') {
+      dbUser.role = 'admin';
+      await dbUser.save();
+    }
     res.json({
       success: true,
       data: {
@@ -184,14 +191,19 @@ router.get('/me', authenticateToken, async (req: Request, res: Response): Promis
           avatarUrl: dbUser.avatarUrl,
           category: dbUser.category,
           organizationName: dbUser.organizationName,
-          role: dbUser.role,
+          role: isExplicitAdminEmail(dbUser.email) ? 'admin' : dbUser.role,
           autopilotMode: dbUser.autopilotMode || 'assisted',
           aiManager: activeManager(listManagers(dbUser)),
           aiManagers: listManagers(dbUser),
           brandBrain: activeBrandBrain(listBrandBrains(dbUser)),
           brandBrains: listBrandBrains(dbUser),
           socialAccounts: listPublicAccounts(dbUser.socialAccounts || []),
-          notificationSettings: dbUser.notificationSettings
+          notificationSettings: dbUser.notificationSettings,
+          referralCode: dbUser.referralCode || null,
+          referredBy: dbUser.referredBy || null,
+          subscriptionTierSlug: dbUser.subscriptionTierSlug || 'free',
+          subscriptionStatus: dbUser.subscriptionStatus || 'free',
+          currentPeriodEnd: dbUser.currentPeriodEnd || null,
         }
       }
     });
@@ -313,6 +325,8 @@ router.get('/social-accounts/oauth-url', authenticateToken, async (req: Request,
       res.status(400).json({ success: false, error: 'Platform is required' });
       return;
     }
+    const { assertWithinLimit } = await import('../../billing/services/limitsService.js');
+    await assertWithinLimit(userId, 'socialAccounts');
     const result = await socialAdapterService.startOAuth(userId, platform);
     res.json({
       success: true,
@@ -368,15 +382,15 @@ router.post('/social-accounts/connect', authenticateToken, async (req: Request, 
   }
 });
 
-router.delete('/social-accounts/:platform', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+router.delete('/social-accounts/:accountId', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
     if (!userId) {
       res.status(401).json({ success: false, error: 'Authentication required' });
       return;
     }
-    const accounts = await socialAdapterService.disconnect(userId, req.params.platform);
-    res.json({ success: true, message: `${req.params.platform} disconnected`, data: accounts });
+    const accounts = await socialAdapterService.disconnect(userId, decodeURIComponent(req.params.accountId));
+    res.json({ success: true, message: 'Account disconnected', data: accounts });
   } catch (err: any) {
     res.status(400).json({ success: false, error: err.message });
   }
@@ -460,6 +474,8 @@ router.post('/ai-manager', authenticateToken, async (req: Request, res: Response
     const brands = listBrandBrains(existing);
     const brand = brands.find((item: any) => item.id === brandId) || activeBrandBrain(brands);
     const linked = connectedPlatforms(existing);
+    const { connectedAccountIds } = await import('../services/workspaceProfiles.js');
+    const linkedIds = connectedAccountIds(existing);
     const requested = Array.isArray(postTo) ? postTo.map((item: any) => String(item).trim()).filter(Boolean) : [];
     const warnings: string[] = [];
     if (!brands.length || !brand) {
@@ -470,8 +486,15 @@ router.post('/ai-manager', authenticateToken, async (req: Request, res: Response
     }
     if (!requested.length) {
       warnings.push('No posting destinations were chosen. Pick where this AI should post before it can run.');
-    } else if (requested.some((platform: string) => !linked.includes(platform))) {
-      warnings.push('Some posting destinations are not connected yet. The AI will not run until those accounts are linked.');
+    } else {
+      const ok = requested.every((dest: string) => {
+        if (linkedIds.includes(dest)) return true;
+        const platform = dest.toLowerCase() === 'x' ? 'twitter' : dest.toLowerCase();
+        return linked.includes(platform) || linkedIds.some((id) => id.startsWith(`${platform}:`));
+      });
+      if (!ok) {
+        warnings.push('Some posting destinations are not connected yet. The AI will not run until those accounts are linked.');
+      }
     }
 
     const payload = {
@@ -495,6 +518,8 @@ router.post('/ai-manager', authenticateToken, async (req: Request, res: Response
       syncManagers(existing, next);
       saved = next.find((item) => item.id === id);
     } else {
+      const { assertWithinLimit } = await import('../../billing/services/limitsService.js');
+      await assertWithinLimit(userId, 'agents');
       saved = {
         id: newProfileId('mgr'),
         ...payload,
@@ -514,7 +539,8 @@ router.post('/ai-manager', authenticateToken, async (req: Request, res: Response
       data: { item: saved, items, activeId: activeManager(items)?.id || null, warnings }
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    const limitHit = /Plan limit|Free\/plan limit|Daily /.test(err.message || '');
+    res.status(limitHit ? 403 : 500).json({ success: false, error: err.message });
   }
 });
 
@@ -662,6 +688,8 @@ router.put('/brand-brain', authenticateToken, async (req: Request, res: Response
       syncBrandBrains(dbUser, next);
       saved = next.find((item) => item.id === id);
     } else {
+      const { assertWithinLimit } = await import('../../billing/services/limitsService.js');
+      await assertWithinLimit(userId, 'brands');
       saved = {
         id: newProfileId('brand'),
         ...payload,
@@ -689,7 +717,8 @@ router.put('/brand-brain', authenticateToken, async (req: Request, res: Response
       data: { item: saved, items, activeId: activeBrandBrain(items)?.id || null }
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    const limitHit = /Plan limit|Free\/plan limit/.test(err.message || '');
+    res.status(limitHit ? 403 : 500).json({ success: false, error: err.message });
   }
 });
 
@@ -1156,6 +1185,9 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
       res.status(400).json({ success: false, error: 'message is required' });
       return;
     }
+    const { assertWithinLimit, bumpAiMessageUsage } = await import('../../billing/services/limitsService.js');
+    await assertWithinLimit(userId, 'aiMessages');
+    await bumpAiMessageUsage(userId);
     const channel = conversationChannel(String(req.body?.channel || ''));
     const requestedThreadId = String(req.body?.threadId || '').trim();
     const threads = await loadChannelThreads(userId, channel);
@@ -1294,7 +1326,8 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
       }))
     });
   } catch (err: any) {
-    res.status(500).json({ success: false, error: err.message });
+    const limitHit = /Daily AI message limit|Plan limit/.test(err.message || '');
+    res.status(limitHit ? 403 : 500).json({ success: false, error: err.message });
   }
 });
 
@@ -1305,11 +1338,14 @@ router.post('/ai-cron/start', authenticateToken, async (req: Request, res: Respo
       res.status(401).json({ success: false, error: 'Authentication required' });
       return;
     }
+    const { assertWithinLimit } = await import('../../billing/services/limitsService.js');
+    await assertWithinLimit(userId, 'cron');
+    await assertWithinLimit(userId, 'jobsPerDay');
     const cron = await agentCronService.start(userId, req.body?.managerId);
     res.json({ success: true, message: 'AI cron started', data: cron });
   } catch (err: any) {
     logger.error(`AI cron start failed: ${err.message}`);
-    const known = /Hire an AI|Save at least|Link this AI|Connect at least|Choose where|posting destinations/.test(err.message || '');
+    const known = /Hire an AI|Save at least|Link this AI|Connect at least|Choose where|posting destinations|Plan limit|Daily job|not available on your current plan/.test(err.message || '');
     res.status(400).json({ success: false, error: known ? err.message : 'Could not start the AI right now.' });
   }
 });

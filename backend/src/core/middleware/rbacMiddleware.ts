@@ -1,6 +1,7 @@
 import { Request, Response, NextFunction } from 'express';
 import { logger } from '../logger/index.js';
 import { tokenService } from '../../api/auth/services/tokenService.js';
+import { isExplicitAdminEmail } from '../../api/auth/services/adminEmails.js';
 
 export type UserRole = 'admin' | 'user';
 
@@ -39,10 +40,13 @@ export const authenticateToken = (req: Request, res: Response, next: NextFunctio
     return;
   }
 
+  const role: UserRole =
+    isExplicitAdminEmail(payload.email) || payload.role === 'admin' ? 'admin' : 'user';
+
   req.user = {
     id: payload.userId,
     email: payload.email,
-    role: payload.role
+    role,
   };
 
   next();

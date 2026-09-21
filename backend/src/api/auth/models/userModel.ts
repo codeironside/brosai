@@ -194,6 +194,25 @@ const UserSchema = new mongoose.Schema({
     updatedAt: { type: Date, default: Date.now }
   }],
 
+  referralCode: { type: String, unique: true, sparse: true },
+  referredBy: { type: String, default: null },
+
+  subscriptionTierSlug: { type: String, default: 'free' },
+  subscriptionStatus: {
+    type: String,
+    enum: ['free', 'active', 'past_due', 'cancelled'],
+    default: 'free',
+  },
+  paymentCustomerId: { type: String, default: '' },
+  lastPaymentProvider: { type: String, default: '' },
+  lastCheckoutTxRef: { type: String, default: '' },
+  currentPeriodEnd: Date,
+
+  usageCounters: {
+    aiMessagesDay: String,
+    aiMessagesCount: { type: Number, default: 0 },
+  },
+
   createdAt: { type: Date, default: Date.now }
 });
 
