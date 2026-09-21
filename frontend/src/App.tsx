@@ -26,7 +26,19 @@ function initialPage(): PageRoute {
   if (path === '/terms') return 'terms';
   if (path !== '/') return 'notfound';
   const params = new URLSearchParams(window.location.search);
+  const ref = params.get('ref');
+  if (ref) {
+    try {
+      sessionStorage.setItem('brosai_ref', ref);
+      localStorage.setItem('brosai_ref', ref);
+    } catch {
+      /* ignore */
+    }
+  }
   if (params.get('oauth') || sessionStorage.getItem('brosai_return_dashboard') === '1') {
+    return 'dashboard';
+  }
+  if (params.get('billing') === 'return') {
     return 'dashboard';
   }
   return 'home';

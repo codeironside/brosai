@@ -105,7 +105,7 @@ export const AiManagerConfigView: React.FC = () => {
   const [customHours, setCustomHours] = useState(false);
   const [saveWarning, setSaveWarning] = useState<string | null>(null);
   const [brands, setBrands] = useState<Array<{ id: string; brandName: string }>>([]);
-  const [connectedPlatforms, setConnectedPlatforms] = useState<string[]>([]);
+  const [destinations, setDestinations] = useState<Array<{ id: string; platform: string; handle: string; connected: boolean }>>([]);
   const [brandId, setBrandId] = useState('');
   const [postTo, setPostTo] = useState<string[]>([]);
 
@@ -180,7 +180,16 @@ export const AiManagerConfigView: React.FC = () => {
         const nextBrands = Array.isArray(json?.data?.brands) ? json.data.brands : [];
         setBrands(nextBrands);
         const socials = Array.isArray(json?.data?.socialAccounts) ? json.data.socialAccounts : [];
-        setConnectedPlatforms(socials.filter((item: any) => item.connected).map((item: any) => item.platform));
+        setDestinations(
+          socials
+            .filter((item: any) => item.connected && item.platform)
+            .map((item: any) => ({
+              id: String(item.id || `${item.platform}:${item.accountId || item.handle || ''}`),
+              platform: String(item.platform),
+              handle: String(item.handle || item.accountId || item.platform),
+              connected: true,
+            })),
+        );
         applyList(items, json?.data?.activeId);
       } catch (err) {
         console.warn('Failed to load AI manager config:', err);
@@ -405,7 +414,11 @@ export const AiManagerConfigView: React.FC = () => {
               ['Voice', selected.personality],
               ['Goal', selected.goal],
               ['Brand', selected.brandName || 'Not linked'],
-              ['Posts to', (selected.postTo || []).map((id) => PLATFORM_OPTIONS.find((p) => p.id === id)?.label || id).join(', ') || 'Not set'],
+              ['Posts to', (selected.postTo || []).map((id) => {
+                const dest = destinations.find((d) => d.id === id);
+                if (dest) return `${PLATFORM_OPTIONS.find((p) => p.id === dest.platform)?.label || dest.platform} · ${dest.handle}`;
+                return PLATFORM_OPTIONS.find((p) => p.id === id)?.label || id;
+              }).join(', ') || 'Not set'],
               ['Posting frequency', selected.postingFrequency],
               ['Working hours', selected.workingHours],
               ['Control level', MODE_LABELS[selected.autopilotMode] || selected.autopilotMode],
@@ -532,30 +545,39 @@ export const AiManagerConfigView: React.FC = () => {
 
         <div>
           <label className="block text-xs font-semibold text-white/80 uppercase tracking-wider mb-2">Where should this AI post?</label>
-          <p className="text-[11px] text-white/55 mb-2">Pick where this AI should post. Unconnected accounts can still be saved — the AI will not run until they are linked.</p>
-          <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-            {PLATFORM_OPTIONS.map((item) => {
-              const connected = connectedPlatforms.includes(item.id);
-              const selectedDest = postTo.includes(item.id);
-              return (
-                <button
-                  key={item.id}
-                  type="button"
-                  onClick={() => {
-                    setPostTo((prev) => prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id]);
-                  }}
-                  className={`p-3 rounded-xl text-left border transition-all ${
-                    selectedDest
-                      ? 'bg-white/20 border-white/40 text-white'
-                      : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'
-                  }`}
-                >
-                  <div className="text-xs font-semibold">{item.label}</div>
-                  <div className="text-[10px] mt-0.5">{connected ? (selectedDest ? 'Selected' : 'Connected') : 'Not connected yet'}</div>
-                </button>
-              );
-            })}
-          </div>
+          <p className="text-[11px] text-white/55 mb-2">
+            Pick specific linked accounts. Connect more under Connections if the list is empty.
+          </p>
+          {destinations.length === 0 ? (
+            <p className="text-xs text-white/60">No social accounts linked yet. Connect LinkedIn, X, Facebook, or Threads first.</p>
+          ) : (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+              {destinations.map((item) => {
+                const selectedDest = postTo.includes(item.id);
+                const label = PLATFORM_OPTIONS.find((p) => p.id === item.platform)?.label || item.platform;
+                return (
+                  <button
+                    key={item.id}
+                    type="button"
+                    onClick={() => {
+                      setPostTo((prev) =>
+                        prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id],
+                      );
+                    }}
+                    className={`p-3 rounded-xl text-left border transition-all ${
+                      selectedDest
+                        ? 'bg-white/20 border-white/40 text-white'
+                        : 'bg-white/10 border-white/20 text-white/80 hover:bg-white/15'
+                    }`}
+                  >
+                    <div className="text-xs font-semibold">{label}</div>
+                    <div className="text-[11px] mt-0.5 truncate">{item.handle}</div>
+                    <div className="text-[10px] mt-1 opacity-70">{selectedDest ? 'Selected' : 'Tap to include'}</div>
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div className="space-y-3 pt-2">
