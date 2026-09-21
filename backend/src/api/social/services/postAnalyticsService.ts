@@ -21,6 +21,7 @@ type TrackedPost = {
   runId: string;
   platform: string;
   postId: string;
+  accountId?: string;
 };
 
 class RateLimitedError extends Error {
@@ -282,15 +283,21 @@ export async function refreshPostAnalytics(userId: string): Promise<{ cached: bo
 
     const staggered = [
       ...(byPlatform.facebook || []).map((post) => ({ post, fetch: () => {
-        const account = accounts.find((item: any) => item.platform === 'facebook' && item.connected && item.accessTokenEnc);
+        const account = accounts.find((item: any) =>
+          item.platform === 'facebook' && item.connected && item.accessTokenEnc
+          && (!post.accountId || String(item.accountId) === String(post.accountId)));
         return account ? fetchFacebook(account, post.postId) : Promise.resolve(emptySlice());
       } })),
       ...(byPlatform.linkedin || []).map((post) => ({ post, fetch: () => {
-        const account = accounts.find((item: any) => item.platform === 'linkedin' && item.connected && item.accessTokenEnc);
+        const account = accounts.find((item: any) =>
+          item.platform === 'linkedin' && item.connected && item.accessTokenEnc
+          && (!post.accountId || String(item.accountId) === String(post.accountId)));
         return account ? fetchLinkedIn(account, post.postId) : Promise.resolve(emptySlice());
       } })),
       ...(byPlatform.threads || []).map((post) => ({ post, fetch: () => {
-        const account = accounts.find((item: any) => item.platform === 'threads' && item.connected && item.accessTokenEnc);
+        const account = accounts.find((item: any) =>
+          item.platform === 'threads' && item.connected && item.accessTokenEnc
+          && (!post.accountId || String(item.accountId) === String(post.accountId)));
         return account ? fetchThreads(account, post.postId) : Promise.resolve(emptySlice());
       } }))
     ];

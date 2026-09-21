@@ -4,13 +4,13 @@ import { logger } from '../../../../core/logger/index.js';
 
 export const loginController = async (req: Request, res: Response): Promise<void> => {
   try {
-    const { email, name, avatarUrl } = req.body;
+    const { email, name, avatarUrl, referralCode } = req.body;
     if (!email) {
       res.status(400).json({ success: false, error: 'Email parameter is required for Google OAuth login.' });
       return;
     }
 
-    const result = await loginService.authenticateGoogleUser({ email, name, avatarUrl });
+    const result = await loginService.authenticateGoogleUser({ email, name, avatarUrl, referralCode });
     res.json({ success: true, data: result });
   } catch (error: any) {
     logger.error(`LoginController Error: ${error.message}`);

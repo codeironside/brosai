@@ -10,6 +10,7 @@ import socialRoutes from '../api/social/routes/index.js';
 import postsRoutes from '../api/posts/routes/index.js';
 import inboxRoutes from '../api/inbox/routes/index.js';
 import notificationsRoutes from '../api/notifications/routes/index.js';
+import billingRoutes from '../api/billing/routes/index.js';
 import { oauthCallbackController } from '../api/social/controllers/oauthCallback/index.js';
 
 export const createApp = (): Express => {
@@ -59,6 +60,8 @@ export const createApp = (): Express => {
   app.use('/api/v1/notifications', notificationsRoutes);
   app.use('/api/notifications', notificationsRoutes);
 
+  app.use('/api/v1/billing', billingRoutes);
+  app.use('/api/billing', billingRoutes);
 
   // Global 404 Route Handler
   app.use((req: Request, res: Response) => {

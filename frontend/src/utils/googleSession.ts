@@ -18,6 +18,9 @@ export async function establishGoogleSession(login: LoginFn): Promise<{ ok: bool
   const email = res.user.email || 'user@vamvamvam.ai';
   const name = res.user.displayName || 'Vamvamvam User';
   const avatarUrl = res.user.photoURL || '';
+  const referralCode =
+    (typeof window !== 'undefined' && (sessionStorage.getItem('brosai_ref') || localStorage.getItem('brosai_ref'))) ||
+    '';
 
   let lastBackendError = '';
   for (let attempt = 0; attempt < 4; attempt++) {
@@ -25,7 +28,7 @@ export async function establishGoogleSession(login: LoginFn): Promise<{ ok: bool
       const backendRes = await fetch('/api/auth/google', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email, name, avatarUrl }),
+        body: JSON.stringify({ email, name, avatarUrl, referralCode: referralCode || undefined }),
       });
       const backendData = await backendRes.json().catch(() => ({}));
       if (backendData.success && backendData.data?.user) {

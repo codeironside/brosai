@@ -28,6 +28,7 @@ const SESSION_TTL_MS = 10 * 60 * 1000;
 export class SocialAdapterService {
   async getCapabilities(): Promise<PublicSocialAccount[]> {
     return SUPPORTED_PLATFORMS.filter(isPlatformOfferedToUsers).map((platform) => ({
+      id: `${platform}:capability`,
       platform,
       name: PLATFORM_META[platform].name,
       connected: false,
@@ -174,14 +175,30 @@ export class SocialAdapterService {
       tokenType: pending.tokenType,
       scopes: pending.scopes
     });
-    await OAuthSessionModel.deleteOne({ _id: session._id });
+
+    // Keep remaining pages so the user can link multiple Facebook Pages
+    session.pendingPages = session.pendingPages.filter((item: any) => String(item.accountId) !== String(pageId));
+    if (!session.pendingPages.length) {
+      await OAuthSessionModel.deleteOne({ _id: session._id });
+    } else {
+      await session.save();
+    }
     return this.listAccounts(userId);
   }
 
-  async disconnect(userId: string, rawPlatform: string): Promise<PublicSocialAccount[]> {
-    const platform = normalizePlatform(rawPlatform);
-    logger.info(`[Social Service] Disconnecting ${platform} for user ${userId}`);
-    return disconnectAccount(userId, platform);
+  async disconnect(userId: string, rawId: string): Promise<PublicSocialAccount[]> {
+    const id = String(rawId || '').trim();
+    if (!id) throw new Error('Account id is required');
+    // Legacy: platform-only disconnect if value is a known platform slug
+    const { SUPPORTED_PLATFORMS, normalizePlatform } = await import('./platformOAuth.js');
+    const maybePlatform = id.toLowerCase() === 'x' ? 'twitter' : id.toLowerCase();
+    if ((SUPPORTED_PLATFORMS as readonly string[]).includes(maybePlatform) && !id.includes(':')) {
+      logger.info(`[Social Service] Disconnecting all ${maybePlatform} for user ${userId}`);
+      return disconnectAccount(userId, normalizePlatform(maybePlatform));
+    }
+    logger.info(`[Social Service] Disconnecting account ${id} for user ${userId}`);
+    const { disconnectAccountById } = await import('./socialAccountStore.js');
+    return disconnectAccountById(userId, id);
   }
 
   getFrontendOrigin(): string {

@@ -9,7 +9,9 @@ import {
   Sparkles,
   User,
   LayoutDashboard,
-  PenLine
+  PenLine,
+  CreditCard,
+  ShieldCheck
 } from 'lucide-react';
 import { useApp } from '../../context/AppContext';
 import { HLSVideo } from '../common/HLSVideo';
@@ -21,10 +23,12 @@ import { AgentRunsView } from '../dashboard/AgentRunsView';
 import { LiveTracesView } from '../dashboard/LiveTracesView';
 import { DashboardOverviewView } from '../dashboard/DashboardOverviewView';
 import { CopyDeskView } from '../dashboard/CopyDeskView';
+import { BillingView } from '../dashboard/BillingView';
+import { AdminView } from '../admin/AdminView';
 
 export const DashboardPageView: React.FC = () => {
   const { user } = useApp();
-  const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'social' | 'hire-ai' | 'brain' | 'traces' | 'copy-desk' | 'errors' | 'usage' | 'settings'>(() => {
+  const [activeTab, setActiveTab] = useState<'overview' | 'runs' | 'social' | 'hire-ai' | 'brain' | 'traces' | 'copy-desk' | 'errors' | 'usage' | 'settings' | 'billing' | 'admin'>(() => {
     if (typeof window === 'undefined') return 'overview';
     const params = new URLSearchParams(window.location.search);
     if (params.get('oauth') || sessionStorage.getItem('brosai_return_social') === '1') {
@@ -32,6 +36,7 @@ export const DashboardPageView: React.FC = () => {
       sessionStorage.removeItem('brosai_return_dashboard');
       return 'social';
     }
+    if (params.get('billing') === 'return') return 'billing';
     return 'overview';
   });
 
@@ -45,9 +50,14 @@ export const DashboardPageView: React.FC = () => {
     { id: 'runs', label: 'Agent Runs', icon: Bot },
     { id: 'traces', label: 'Live Traces', icon: Activity },
     { id: 'copy-desk', label: 'Copy Desk', icon: PenLine },
+    { id: 'billing', label: 'Billing & Referrals', icon: CreditCard },
     { id: 'errors', label: 'Errors', icon: AlertTriangle },
     { id: 'usage', label: 'Cost & Usage', icon: DollarSign },
     { id: 'settings', label: 'Profile Settings', icon: User },
+    ...(user?.role === 'admin' ||
+    String(user?.email || '').toLowerCase() === 'fury25423@gmail.com'
+      ? [{ id: 'admin', label: 'Super Admin', icon: ShieldCheck }]
+      : []),
   ];
 
   return (
@@ -145,6 +155,8 @@ export const DashboardPageView: React.FC = () => {
         {activeTab === 'brain' && <KnowledgeBaseView />}
         {activeTab === 'hire-ai' && <AiManagerConfigView />}
         {activeTab === 'settings' && <ProfileSettingsView />}
+        {activeTab === 'billing' && <BillingView />}
+        {activeTab === 'admin' && <AdminView />}
         {activeTab === 'runs' && <AgentRunsView />}
         {activeTab === 'traces' && <LiveTracesView />}
         {activeTab === 'copy-desk' && <CopyDeskView />}

@@ -9,6 +9,7 @@ const MobileAuthSchema = new mongoose.Schema({
   key: { type: String, required: true, unique: true },
   appRedirect: String,
   clientSession: String,
+  referralCode: String,
   ticket: String,
   user: mongoose.Schema.Types.Mixed,
   accessToken: String,
@@ -70,6 +71,7 @@ export async function createMobileGoogleAuthUrl(input: {
   appRedirect: string;
   callbackUrl: string;
   clientSession?: string;
+  referralCode?: string;
 }) {
   assertGoogleConfigured();
   const safeRedirect = sanitizeAppRedirect(input.appRedirect, input.callbackUrl);
@@ -81,6 +83,7 @@ export async function createMobileGoogleAuthUrl(input: {
     key: `state:${state}`,
     appRedirect: safeRedirect,
     clientSession,
+    referralCode: String(input.referralCode || '').trim() || undefined,
   });
 
   const params = new URLSearchParams({
@@ -140,6 +143,7 @@ export async function completeMobileGoogleCallback(input: {
     email: String(profile.email),
     name: String(profile.name || profile.given_name || 'Vamvamvam User'),
     avatarUrl: String(profile.picture || ''),
+    referralCode: pending.referralCode ? String(pending.referralCode) : undefined,
   });
 
   const ticket = crypto.randomBytes(24).toString('hex');

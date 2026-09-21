@@ -1,4 +1,4 @@
-import React, { createContext, useContext, useState, useCallback } from 'react';
+import React, { createContext, useContext, useState, useCallback, useEffect } from 'react';
 import {
   UserProfile,
   BrandBrain,
@@ -21,6 +21,7 @@ interface AppContextType {
   isAuthenticated: boolean;
   login: (userData: Partial<UserProfile>, accessToken: string, refreshToken: string) => void;
   logout: () => void;
+  refreshProfile: () => Promise<void>;
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
   brandBrain: BrandBrain;
   setBrandBrain: React.Dispatch<React.SetStateAction<BrandBrain>>;
@@ -165,6 +166,39 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
 
     return response;
   }, [accessToken, refreshToken, logout]);
+
+  const refreshProfile = useCallback(async () => {
+    const token = localStorage.getItem('brosai_access_token') || accessToken;
+    if (!token) return;
+    try {
+      const res = await authenticatedFetch('/api/auth/me');
+      const json = await res.json().catch(() => ({}));
+      const profile = json?.data?.user;
+      if (!profile) return;
+      setUser((prev) => {
+        const updated = {
+          ...prev,
+          id: profile.id || prev.id,
+          name: profile.name || prev.name,
+          email: profile.email || prev.email,
+          avatarUrl: profile.avatarUrl || prev.avatarUrl,
+          category: profile.category || prev.category,
+          organizationName: profile.organizationName ?? prev.organizationName,
+          role: (profile.role as UserProfile['role']) || prev.role || 'user',
+          authProvider: prev.authProvider || 'google',
+        };
+        localStorage.setItem('brosai_user_data', JSON.stringify(updated));
+        return updated;
+      });
+    } catch (err) {
+      console.warn('Failed to refresh profile:', err);
+    }
+  }, [accessToken, authenticatedFetch]);
+
+  useEffect(() => {
+    if (!accessToken) return;
+    void refreshProfile();
+  }, [accessToken, refreshProfile]);
 
   const [workspaces] = useState<AgencyWorkspace[]>([
     { id: 'ws_1', name: 'BrandBuilder SaaS (Primary)', category: 'business', activeAccounts: 4, healthScore: 88 },
@@ -515,6 +549,7 @@ export const AppProvider: React.FC<{ children: React.ReactNode }> = ({ children 
         isAuthenticated,
         login,
         logout,
+        refreshProfile,
         authenticatedFetch,
         brandBrain,
         setBrandBrain,
