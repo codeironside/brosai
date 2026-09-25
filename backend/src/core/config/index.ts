@@ -24,6 +24,26 @@ const firstCorsOrigin = (process.env.CORS_ORIGINS || 'http://localhost:3000')
   .map(origin => origin.trim())
   .filter(Boolean)[0] || 'http://localhost:3000';
 
+const corsOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173')
+  .split(',')
+  .map((origin) => origin.trim())
+  .filter(Boolean);
+
+function isEphemeralOrigin(url: string) {
+  return /trycloudflare\.com|localhost|127\.0\.0\.1/i.test(url);
+}
+
+/** Stable marketing/app URL for referral links (never a tunnel). */
+function resolvePublicSiteUrl() {
+  const candidates = [
+    process.env.PUBLIC_SITE_URL,
+    process.env.FRONTEND_URL,
+    ...corsOrigins,
+  ].filter(Boolean) as string[];
+  const stable = candidates.find((u) => u && !isEphemeralOrigin(u));
+  return (stable || 'https://vamvamvamai.com').replace(/\/+$/, '');
+}
+
 export const config = {
   app: {
     env: process.env.NODE_ENV || 'development',
@@ -35,6 +55,8 @@ export const config = {
     jwtRefreshExpiration: process.env.JWT_REFRESH_EXPIRATION || '7d',
     defaultUserRole: (process.env.DEFAULT_USER_ROLE as 'admin' | 'user') || 'user',
     frontendUrl: process.env.FRONTEND_URL || firstCorsOrigin,
+    /** Referral / share links — prefers production site over tunnels */
+    publicSiteUrl: resolvePublicSiteUrl(),
     tokenEncryptionKey: process.env.TOKEN_ENCRYPTION_KEY || '',
   },
 
@@ -45,9 +67,9 @@ export const config = {
     name: process.env.DB_NAME || 'brosai',
   },
   cors: {
-    origins: (process.env.CORS_ORIGINS || 'http://localhost:3000,http://localhost:5173')
-      .split(',')
-      .map(origin => origin.trim()),
+    origins: corsOrigins.length
+      ? corsOrigins
+      : ['http://localhost:3000', 'http://localhost:5173'],
   },
   firebase: {
     projectId: process.env.FIREBASE_PROJECT_ID || 'brosai-dev-project',

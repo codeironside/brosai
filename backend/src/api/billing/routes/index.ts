@@ -7,10 +7,21 @@ import {
   listAllTiers,
   upsertTier,
   deactivateTier,
+  activateTier,
+  getCreditCosts,
+  listActiveCreditPacks,
+  listAllCreditPacks,
+  upsertCreditPack,
 } from '../services/settingsService.js';
-import { startCheckout, handleProviderWebhook, forceAssignTier } from '../services/billingService.js';
+import {
+  startCheckout,
+  startCreditPackCheckout,
+  handleProviderWebhook,
+  forceAssignTier,
+  setSubscriptionBypass,
+} from '../services/billingService.js';
 import { ensureReferralCode, getReferralSummary } from '../services/referralService.js';
-import { resolveUserTierLimits } from '../services/limitsService.js';
+import { getUsageSnapshot } from '../services/usageCreditsService.js';
 import { listPaymentAdapters } from '../services/payment/index.js';
 import type { PaymentProviderId } from '../services/payment/types.js';
 import {
@@ -37,6 +48,16 @@ router.get('/tiers', async (_req: Request, res: Response): Promise<void> => {
   }
 });
 
+router.get('/credit-packs', async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const packs = await listActiveCreditPacks();
+    const creditCosts = await getCreditCosts();
+    res.json({ success: true, data: { packs, creditCosts } });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
 router.get('/me', authenticateToken, async (req: Request, res: Response): Promise<void> => {
   try {
     const userId = req.user?.id;
@@ -51,18 +72,18 @@ router.get('/me', authenticateToken, async (req: Request, res: Response): Promis
       return;
     }
     const code = await ensureReferralCode(user);
-    const { slug, status, limits } = await resolveUserTierLimits(user);
+    const usage = await getUsageSnapshot(user);
     const referral = await getReferralSummary(userId);
     const settings = await getAppSettings();
-    const shareBase = config.app.frontendUrl.replace(/\/+$/, '');
+    const creditCosts = await getCreditCosts();
+    const shareBase = config.app.publicSiteUrl.replace(/\/+$/, '');
+    await user.save();
     res.json({
       success: true,
       data: {
-        subscriptionTierSlug: slug,
-        subscriptionStatus: status,
-        currentPeriodEnd: user.currentPeriodEnd || null,
-        limits,
+        ...usage,
         paymentProvider: settings.paymentProvider || 'monnify',
+        creditCosts,
         referralCode: code,
         referralShareUrl: `${shareBase}/?ref=${encodeURIComponent(code)}`,
         referredBy: user.referredBy || null,
@@ -93,6 +114,25 @@ router.post('/checkout', authenticateToken, async (req: Request, res: Response):
   }
 });
 
+router.post('/checkout/credits', authenticateToken, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const userId = req.user?.id;
+    if (!userId) {
+      res.status(401).json({ success: false, error: 'Authentication required' });
+      return;
+    }
+    const packSlug = String(req.body?.packSlug || req.body?.slug || '').trim();
+    if (!packSlug) {
+      res.status(400).json({ success: false, error: 'packSlug is required' });
+      return;
+    }
+    const result = await startCreditPackCheckout(userId, packSlug);
+    res.json({ success: true, data: result });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 async function webhookHandler(provider: PaymentProviderId, req: Request, res: Response) {
   try {
     const result = await handleProviderWebhook(provider, req.headers as any, req.body);
@@ -105,7 +145,6 @@ async function webhookHandler(provider: PaymentProviderId, req: Request, res: Re
 
 router.post('/webhook/monnify', (req, res) => webhookHandler('monnify', req, res));
 router.post('/webhook/paystack', (req, res) => webhookHandler('paystack', req, res));
-/** Dispatches to the active provider from AppSettings */
 router.post('/webhook', async (req: Request, res: Response): Promise<void> => {
   try {
     const settings = await getAppSettings();
@@ -132,7 +171,7 @@ router.get('/referral', authenticateToken, async (req: Request, res: Response): 
     const code = await ensureReferralCode(user);
     const summary = await getReferralSummary(userId);
     const settings = await getAppSettings();
-    const shareBase = config.app.frontendUrl.replace(/\/+$/, '');
+    const shareBase = config.app.publicSiteUrl.replace(/\/+$/, '');
     res.json({
       success: true,
       data: {
@@ -153,6 +192,8 @@ router.get('/admin/settings', ...admin, async (_req: Request, res: Response): Pr
   try {
     const settings = await getAppSettings();
     const tiers = await listAllTiers();
+    const creditPacks = await listAllCreditPacks();
+    const creditCosts = await getCreditCosts();
     const metrics = await getPlatformMetrics();
     res.json({
       success: true,
@@ -160,6 +201,8 @@ router.get('/admin/settings', ...admin, async (_req: Request, res: Response): Pr
         referralCommissionPercent: settings.referralCommissionPercent,
         paymentProvider: settings.paymentProvider || 'monnify',
         paymentProviders: listPaymentAdapters(),
+        creditCosts,
+        creditPacks,
         updatedAt: settings.updatedAt,
         updatedBy: settings.updatedBy,
         tiers,
@@ -181,6 +224,7 @@ router.put('/admin/settings', ...admin, async (req: Request, res: Response): Pro
             ? Number(body.referralCommissionPercent)
             : undefined,
         paymentProvider: body.paymentProvider,
+        creditCosts: body.creditCosts,
       },
       req.user?.email || req.user?.id || '',
     );
@@ -189,6 +233,7 @@ router.put('/admin/settings', ...admin, async (req: Request, res: Response): Pro
       data: {
         referralCommissionPercent: settings.referralCommissionPercent,
         paymentProvider: settings.paymentProvider,
+        creditCosts: await getCreditCosts(),
         updatedAt: settings.updatedAt,
         updatedBy: settings.updatedBy,
       },
@@ -234,6 +279,33 @@ router.post('/admin/tiers/:id/deactivate', ...admin, async (req: Request, res: R
   }
 });
 
+router.post('/admin/tiers/:id/activate', ...admin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const tier = await activateTier(req.params.id);
+    res.json({ success: true, data: { tier } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/admin/credit-packs', ...admin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const pack = await upsertCreditPack(req.body || {});
+    res.json({ success: true, data: { pack } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.put('/admin/credit-packs/:id', ...admin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const pack = await upsertCreditPack(req.body || {}, req.params.id);
+    res.json({ success: true, data: { pack } });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
 router.get('/admin/users', ...admin, async (req: Request, res: Response): Promise<void> => {
   try {
     const limit = Math.min(100, Math.max(1, Number(req.query.limit) || 20));
@@ -261,14 +333,36 @@ router.post('/admin/users/:id/force-tier', ...admin, async (req: Request, res: R
       res.status(400).json({ success: false, error: 'tierSlug is required' });
       return;
     }
-    const user = await forceAssignTier(req.params.id, tierSlug, req.body?.status);
+    const user = await forceAssignTier(req.params.id, tierSlug, req.body?.status, {
+      bypass: req.body?.bypass,
+    });
     res.json({
       success: true,
       data: {
         id: String(user._id),
         subscriptionTierSlug: user.subscriptionTierSlug,
         subscriptionStatus: user.subscriptionStatus,
+        subscriptionBypass: user.subscriptionBypass,
         currentPeriodEnd: user.currentPeriodEnd,
+      },
+    });
+  } catch (err: any) {
+    res.status(400).json({ success: false, error: err.message });
+  }
+});
+
+router.post('/admin/users/:id/bypass', ...admin, async (req: Request, res: Response): Promise<void> => {
+  try {
+    const bypass = Boolean(req.body?.bypass);
+    const tierSlug = req.body?.tierSlug ? String(req.body.tierSlug).trim() : undefined;
+    const user = await setSubscriptionBypass(req.params.id, bypass, tierSlug);
+    res.json({
+      success: true,
+      data: {
+        id: String(user._id),
+        subscriptionBypass: user.subscriptionBypass,
+        subscriptionTierSlug: user.subscriptionTierSlug,
+        subscriptionStatus: user.subscriptionStatus,
       },
     });
   } catch (err: any) {
@@ -327,6 +421,15 @@ router.get('/admin/earnings', ...admin, async (req: Request, res: Response): Pro
     const page = Math.max(1, Number(req.query.page) || 1);
     const data = await listEarningsForAdmin(page, limit);
     res.json({ success: true, data });
+  } catch (err: any) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+router.get('/admin/metrics', ...admin, async (_req: Request, res: Response): Promise<void> => {
+  try {
+    const metrics = await getPlatformMetrics();
+    res.json({ success: true, data: metrics });
   } catch (err: any) {
     res.status(500).json({ success: false, error: err.message });
   }
