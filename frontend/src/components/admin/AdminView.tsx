@@ -27,6 +27,9 @@ type Tier = {
   providerPlanId?: string;
   active: boolean;
   sortOrder?: number;
+  badge?: string;
+  contactSales?: boolean;
+  features?: string[];
   limits: Record<string, number | boolean>;
 };
 
@@ -36,14 +39,64 @@ type PageMeta = { page: number; totalPages: number; total: number; limit: number
 const PAGE_SIZE = 10;
 
 const blankLimits = () => ({
-  maxBrands: 0,
-  maxAgents: 0,
-  maxSocialAccounts: 0,
-  maxJobsPerDay: 0,
-  maxAiMessagesPerDay: 0,
+  maxBrands: 1,
+  maxAgents: 1,
+  maxSocialAccounts: 2,
+  maxJobsPerDay: 5,
+  maxAiMessagesPerDay: 50,
   cronEnabled: true,
   imagesEnabled: true,
+  videosEnabled: true,
+  maxAiPostsPerMonth: 30,
+  maxAiVideosPerMonth: 2,
+  maxAiRepliesPerMonth: 50,
+  schedulingDays: 30,
+  monthlyCredits: 300,
+  maxTeamMembers: 1,
 });
+
+const blankTier = (sortOrder = 0): Partial<Tier> => ({
+  slug: '',
+  name: '',
+  description: '',
+  price: 5000,
+  currency: 'NGN',
+  interval: 'monthly',
+  providerPlanId: '',
+  active: true,
+  sortOrder,
+  badge: '',
+  contactSales: false,
+  features: [],
+  limits: blankLimits(),
+});
+
+const LIMIT_GROUPS: Array<{
+  title: string;
+  fields: Array<[keyof ReturnType<typeof blankLimits>, string]>;
+}> = [
+  {
+    title: 'AI quotas (monthly)',
+    fields: [
+      ['monthlyCredits', 'AI credits / month'],
+      ['maxAiPostsPerMonth', 'AI posts / month'],
+      ['maxAiVideosPerMonth', 'AI videos / month'],
+      ['maxAiRepliesPerMonth', 'AI replies / month'],
+      ['schedulingDays', 'Scheduling window (days)'],
+      ['maxAiMessagesPerDay', 'AI chat msgs / day'],
+    ],
+  },
+  {
+    title: 'Workspace & publishing',
+    fields: [
+      ['maxSocialAccounts', 'Social accounts'],
+      ['maxBrands', 'Brands'],
+      ['maxAgents', 'Agents'],
+      ['maxTeamMembers', 'Team seats'],
+      ['maxJobsPerDay', 'Jobs / day'],
+    ],
+  },
+];
 
 function statusTone(status?: string) {
   const s = String(status || '').toLowerCase();
@@ -108,6 +161,8 @@ export const AdminView: React.FC = () => {
   const [paymentProvider, setPaymentProvider] = useState<'monnify' | 'paystack'>('monnify');
   const [providers, setProviders] = useState<Array<{ id: string; configured: boolean }>>([]);
   const [tiers, setTiers] = useState<Tier[]>([]);
+  const [creditCosts, setCreditCosts] = useState<Record<string, number>>({});
+  const [creditPacks, setCreditPacks] = useState<any[]>([]);
   const [users, setUsers] = useState<any[]>([]);
   const [brands, setBrands] = useState<any[]>([]);
   const [jobs, setJobs] = useState<any[]>([]);
@@ -138,6 +193,8 @@ export const AdminView: React.FC = () => {
       setPaymentProvider(settingsJson.data?.paymentProvider === 'paystack' ? 'paystack' : 'monnify');
       setProviders(Array.isArray(settingsJson.data?.paymentProviders) ? settingsJson.data.paymentProviders : []);
       setTiers(Array.isArray(settingsJson.data?.tiers) ? settingsJson.data.tiers : []);
+      setCreditCosts(settingsJson.data?.creditCosts || {});
+      setCreditPacks(Array.isArray(settingsJson.data?.creditPacks) ? settingsJson.data.creditPacks : []);
       setMetrics(settingsJson.data?.metrics || null);
     } catch (err: any) {
       setError(err?.message || 'Failed to load admin data');
@@ -292,6 +349,21 @@ export const AdminView: React.FC = () => {
     }
   };
 
+  const activateTier = async (id: string) => {
+    setSaving(true);
+    try {
+      const res = await authenticatedFetch(`/api/billing/admin/tiers/${id}/activate`, { method: 'POST' });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Activate failed');
+      setMessage('Tier activated (visible on pricing)');
+      await loadCore();
+    } catch (err: any) {
+      setError(err?.message || 'Activate failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
   const openUser = async (id: string) => {
     setError(null);
     const res = await authenticatedFetch(`/api/billing/admin/users/${id}`);
@@ -319,6 +391,46 @@ export const AdminView: React.FC = () => {
       await loadCore();
     } catch (err: any) {
       setError(err?.message || 'Force tier failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const setBypass = async (userId: string, bypass: boolean) => {
+    setSaving(true);
+    try {
+      const res = await authenticatedFetch(`/api/billing/admin/users/${userId}/bypass`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bypass, tierSlug: bypass ? 'agency' : undefined }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Bypass update failed');
+      setMessage(bypass ? 'Subscription bypass enabled' : 'Subscription bypass removed');
+      await openUser(userId);
+      await loadUsers(usersPage);
+    } catch (err: any) {
+      setError(err?.message || 'Bypass update failed');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const saveCreditCosts = async () => {
+    setSaving(true);
+    setError(null);
+    try {
+      const res = await authenticatedFetch('/api/billing/admin/settings', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ creditCosts }),
+      });
+      const json = await res.json();
+      if (!json.success) throw new Error(json.error || 'Could not save credit costs');
+      setCreditCosts(json.data?.creditCosts || creditCosts);
+      setMessage('Credit costs saved');
+    } catch (err: any) {
+      setError(err?.message || 'Could not save credit costs');
     } finally {
       setSaving(false);
     }
@@ -497,166 +609,385 @@ export const AdminView: React.FC = () => {
               </button>
             </div>
           </div>
+
+          <div className="pt-4 border-t border-white/10 space-y-3">
+            <h4 className="text-sm font-semibold text-white">AI credit costs (per action)</h4>
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+              {Object.keys(creditCosts).sort().map((key) => (
+                <label key={key} className="text-[11px] text-white/60 space-y-1">
+                  <span>{key}</span>
+                  <input
+                    type="number"
+                    min={0}
+                    value={Number(creditCosts[key] ?? 0)}
+                    onChange={(e) =>
+                      setCreditCosts((prev) => ({ ...prev, [key]: Number(e.target.value) }))
+                    }
+                    className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white"
+                  />
+                </label>
+              ))}
+            </div>
+            <button
+              type="button"
+              disabled={saving}
+              onClick={saveCreditCosts}
+              className="inline-flex items-center gap-1 rounded-xl bg-white text-black px-3 py-2 text-xs font-semibold"
+            >
+              <Save className="w-3.5 h-3.5" /> Save credit costs
+            </button>
+            {creditPacks.length > 0 ? (
+              <div className="text-[11px] text-white/55 space-y-1">
+                <div className="font-semibold text-white/70">Top-up packs in DB</div>
+                {creditPacks.map((p) => (
+                  <div key={p._id || p.slug}>
+                    {p.name}: ₦{Number(p.price).toLocaleString()} → {p.credits} credits
+                    {!p.active ? ' (inactive)' : ''}
+                  </div>
+                ))}
+              </div>
+            ) : null}
+          </div>
         </div>
       )}
 
       {tab === 'tiers' && (
-        <div className="rounded-2xl bg-white/10 border border-white/20 p-5 space-y-4">
-          <div className="flex items-center justify-between gap-2">
-            <div>
-              <h3 className="text-sm font-semibold text-white">Subscription tiers</h3>
-              <p className="text-[11px] text-white/50 mt-0.5">
-                Deactivate hides a plan from pricing (soft). It is not permanently deleted.
-              </p>
+        <div className="space-y-4">
+          <div className="rounded-2xl bg-white/10 border border-white/20 p-5">
+            <div className="flex flex-wrap items-start justify-between gap-3">
+              <div>
+                <h3 className="text-sm font-semibold text-white">Subscription tiers</h3>
+                <p className="text-[11px] text-white/50 mt-0.5 max-w-xl">
+                  Manage Starter → Agency plans. Limits and credits here power Billing, enforcement, and pricing cards.
+                  Deactivate hides a plan without deleting history.
+                </p>
+              </div>
+              <button
+                type="button"
+                onClick={() => setDraft(blankTier(tiers.length + 1))}
+                className="inline-flex items-center gap-1 rounded-xl bg-white text-black px-3 py-1.5 text-xs font-semibold"
+              >
+                <Plus className="w-3.5 h-3.5" /> New tier
+              </button>
             </div>
-            <button
-              type="button"
-              onClick={() =>
-                setDraft({
-                  slug: '',
-                  name: '',
-                  description: '',
-                  price: 0,
-                  currency: 'NGN',
-                  interval: 'monthly',
-                  providerPlanId: '',
-                  active: true,
-                  sortOrder: tiers.length,
-                  limits: blankLimits(),
-                })
-              }
-              className="inline-flex items-center gap-1 rounded-xl bg-white text-black px-3 py-1.5 text-xs font-semibold"
-            >
-              <Plus className="w-3.5 h-3.5" /> New tier
-            </button>
           </div>
 
-          <div className="space-y-3">
-            {tiers.map((tier) => (
-              <div key={tier._id} className="rounded-xl bg-black/30 border border-white/10 p-3">
-                <div className="flex flex-wrap items-center justify-between gap-2">
-                  <div>
-                    <div className="text-sm font-semibold text-white">
-                      {tier.name} <span className="text-white/50 font-normal">({tier.slug})</span>
-                      {!tier.active ? <span className="ml-2 text-amber-300 text-[10px]">inactive</span> : null}
+          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
+            {[...tiers]
+              .sort((a, b) => Number(a.sortOrder || 0) - Number(b.sortOrder || 0) || a.price - b.price)
+              .map((tier) => {
+                const L = tier.limits || {};
+                return (
+                  <div
+                    key={tier._id}
+                    className={`rounded-2xl border p-4 space-y-3 ${
+                      tier.active ? 'bg-white/10 border-white/20' : 'bg-black/40 border-white/10 opacity-75'
+                    }`}
+                  >
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <div className="flex flex-wrap items-center gap-2">
+                          <span className="text-base font-semibold text-white">{tier.name}</span>
+                          {tier.badge ? (
+                            <span className="text-[10px] font-bold tracking-wide bg-sky-400 text-black px-2 py-0.5 rounded-full">
+                              {tier.badge}
+                            </span>
+                          ) : null}
+                          {!tier.active ? (
+                            <span className="text-[10px] uppercase tracking-wide text-amber-300 border border-amber-400/30 px-1.5 py-0.5 rounded-full">
+                              inactive
+                            </span>
+                          ) : null}
+                          {tier.contactSales ? (
+                            <span className="text-[10px] uppercase tracking-wide text-white/60 border border-white/20 px-1.5 py-0.5 rounded-full">
+                              sales
+                            </span>
+                          ) : null}
+                        </div>
+                        <div className="text-[11px] text-white/45 mt-0.5">{tier.slug}</div>
+                      </div>
+                      <div className="text-right">
+                        <div className="text-lg font-bold text-white">
+                          ₦{Number(tier.price).toLocaleString()}
+                          {tier.contactSales ? '+' : ''}
+                        </div>
+                        <div className="text-[10px] text-white/50">/{tier.interval}</div>
+                      </div>
                     </div>
-                    <div className="text-xs text-white/60">
-                      {Number(tier.price) <= 0
-                        ? 'Free'
-                        : `₦ ${Number(tier.price).toLocaleString()} / ${tier.interval}`}
+
+                    <p className="text-xs text-white/60 line-clamp-2">{tier.description || '—'}</p>
+
+                    <div className="grid grid-cols-2 gap-1.5 text-[11px] text-white/70">
+                      <div className="rounded-lg bg-black/30 border border-white/10 px-2 py-1.5">
+                        Credits <span className="text-white font-semibold">{String(L.monthlyCredits ?? '—')}</span>
+                      </div>
+                      <div className="rounded-lg bg-black/30 border border-white/10 px-2 py-1.5">
+                        Posts <span className="text-white font-semibold">{String(L.maxAiPostsPerMonth ?? '—')}</span>
+                      </div>
+                      <div className="rounded-lg bg-black/30 border border-white/10 px-2 py-1.5">
+                        Videos <span className="text-white font-semibold">{String(L.maxAiVideosPerMonth ?? '—')}</span>
+                      </div>
+                      <div className="rounded-lg bg-black/30 border border-white/10 px-2 py-1.5">
+                        Replies <span className="text-white font-semibold">{String(L.maxAiRepliesPerMonth ?? '—')}</span>
+                      </div>
+                      <div className="rounded-lg bg-black/30 border border-white/10 px-2 py-1.5">
+                        Social <span className="text-white font-semibold">{String(L.maxSocialAccounts ?? '—')}</span>
+                      </div>
+                      <div className="rounded-lg bg-black/30 border border-white/10 px-2 py-1.5">
+                        Schedule{' '}
+                        <span className="text-white font-semibold">{String(L.schedulingDays ?? '—')}d</span>
+                      </div>
                     </div>
-                    <div className="text-[11px] text-white/50 mt-1">
-                      brands {String(tier.limits?.maxBrands)} · agents {String(tier.limits?.maxAgents)} · social{' '}
-                      {String(tier.limits?.maxSocialAccounts)} · jobs/day {String(tier.limits?.maxJobsPerDay)}
-                    </div>
-                  </div>
-                  <div className="flex gap-2">
-                    <button
-                      type="button"
-                      onClick={() => setDraft({ ...tier, limits: { ...blankLimits(), ...tier.limits } })}
-                      className="text-xs font-semibold text-white/80 underline"
-                    >
-                      Edit
-                    </button>
-                    {tier.active && tier.slug !== 'free' ? (
+
+                    {(tier.features || []).length > 0 ? (
+                      <ul className="text-[11px] text-white/55 space-y-0.5 max-h-16 overflow-hidden">
+                        {(tier.features || []).slice(0, 3).map((f) => (
+                          <li key={f}>· {f}</li>
+                        ))}
+                        {(tier.features || []).length > 3 ? (
+                          <li className="text-white/40">+{(tier.features || []).length - 3} more</li>
+                        ) : null}
+                      </ul>
+                    ) : null}
+
+                    <div className="flex flex-wrap gap-2 pt-1">
                       <button
                         type="button"
-                        onClick={() => deactivateTier(tier._id)}
-                        className="text-xs font-semibold text-amber-300/90 underline"
+                        onClick={() =>
+                          setDraft({
+                            ...tier,
+                            features: Array.isArray(tier.features) ? tier.features : [],
+                            limits: { ...blankLimits(), ...tier.limits },
+                          })
+                        }
+                        className="rounded-lg bg-white text-black px-3 py-1.5 text-[11px] font-semibold"
                       >
-                        Deactivate
+                        Edit
                       </button>
-                    ) : null}
+                      {tier.active ? (
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => deactivateTier(tier._id)}
+                          className="rounded-lg bg-amber-500/15 border border-amber-400/30 text-amber-200 px-3 py-1.5 text-[11px] font-semibold"
+                        >
+                          Deactivate
+                        </button>
+                      ) : (
+                        <button
+                          type="button"
+                          disabled={saving}
+                          onClick={() => activateTier(tier._id)}
+                          className="rounded-lg bg-emerald-500/15 border border-emerald-400/30 text-emerald-200 px-3 py-1.5 text-[11px] font-semibold"
+                        >
+                          Activate
+                        </button>
+                      )}
+                    </div>
                   </div>
-                </div>
-              </div>
-            ))}
+                );
+              })}
           </div>
 
           {draft ? (
-            <div className="rounded-xl border border-white/25 bg-white/10 p-4 space-y-3">
-              <h4 className="text-xs font-semibold uppercase text-white/70">
-                {draft._id ? 'Edit tier' : 'Create tier'}
-              </h4>
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
-                {[
-                  ['slug', 'Slug'],
-                  ['name', 'Name'],
-                  ['description', 'Description'],
-                  ['price', 'Price (₦)'],
-                  ['providerPlanId', 'Provider plan id (optional)'],
-                ].map(([key, label]) => (
-                  <label key={key} className="text-[11px] text-white/60 space-y-1">
-                    <span>{label}</span>
-                    <input
-                      value={String((draft as any)[key] ?? '')}
+            <div className="rounded-2xl border border-white/25 bg-white/10 p-5 space-y-5">
+              <div className="flex items-center justify-between gap-2">
+                <h4 className="text-sm font-semibold text-white">
+                  {draft._id ? `Edit · ${draft.name || draft.slug}` : 'Create tier'}
+                </h4>
+                <button
+                  type="button"
+                  onClick={() => setDraft(null)}
+                  className="text-[11px] text-white/60 underline"
+                >
+                  Close
+                </button>
+              </div>
+
+              <section className="space-y-2">
+                <h5 className="text-[10px] font-semibold uppercase tracking-wider text-white/50">Basics</h5>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-2">
+                  {(
+                    [
+                      ['slug', 'Slug (e.g. starter)'],
+                      ['name', 'Display name'],
+                      ['price', 'Price (₦)'],
+                      ['sortOrder', 'Sort order'],
+                      ['badge', 'Badge (e.g. MOST POPULAR)'],
+                      ['providerPlanId', 'Provider plan id (optional)'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="text-[11px] text-white/60 space-y-1">
+                      <span>{label}</span>
+                      <input
+                        type={key === 'price' || key === 'sortOrder' ? 'number' : 'text'}
+                        value={String((draft as any)[key] ?? '')}
+                        onChange={(e) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            [key]:
+                              key === 'price' || key === 'sortOrder'
+                                ? Number(e.target.value)
+                                : e.target.value,
+                            currency: 'NGN',
+                          }))
+                        }
+                        className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white"
+                      />
+                    </label>
+                  ))}
+                  <label className="text-[11px] text-white/60 space-y-1 md:col-span-2">
+                    <span>Description</span>
+                    <textarea
+                      rows={2}
+                      value={String(draft.description || '')}
+                      onChange={(e) => setDraft((prev) => ({ ...prev, description: e.target.value }))}
+                      className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white resize-y"
+                    />
+                  </label>
+                  <label className="text-[11px] text-white/60 space-y-1">
+                    <span>Interval</span>
+                    <select
+                      value={draft.interval || 'monthly'}
                       onChange={(e) =>
                         setDraft((prev) => ({
                           ...prev,
-                          [key]: key === 'price' ? Number(e.target.value) : e.target.value,
-                          currency: 'NGN',
+                          interval: e.target.value as 'monthly' | 'yearly',
                         }))
                       }
                       className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white"
-                    />
+                    >
+                      <option value="monthly">monthly</option>
+                      <option value="yearly">yearly</option>
+                    </select>
                   </label>
-                ))}
-                <label className="text-[11px] text-white/60 space-y-1">
-                  <span>Interval</span>
-                  <select
-                    value={draft.interval || 'monthly'}
-                    onChange={(e) =>
-                      setDraft((prev) => ({
-                        ...prev,
-                        interval: e.target.value as 'monthly' | 'yearly',
-                      }))
-                    }
-                    className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white"
-                  >
-                    <option value="monthly">monthly</option>
-                    <option value="yearly">yearly</option>
-                  </select>
-                </label>
-              </div>
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
-                {(
-                  [
-                    ['maxBrands', 'Max brands'],
-                    ['maxAgents', 'Max agents'],
-                    ['maxSocialAccounts', 'Max social'],
-                    ['maxJobsPerDay', 'Jobs / day'],
-                    ['maxAiMessagesPerDay', 'AI msgs / day'],
-                  ] as const
-                ).map(([key, label]) => (
-                  <label key={key} className="text-[11px] text-white/60 space-y-1">
-                    <span>{label}</span>
-                    <input
-                      type="number"
-                      value={Number(draft.limits?.[key] ?? 0)}
-                      onChange={(e) =>
-                        setDraft((prev) => ({
-                          ...prev,
-                          limits: { ...blankLimits(), ...prev?.limits, [key]: Number(e.target.value) },
-                        }))
-                      }
-                      className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white"
-                    />
-                  </label>
-                ))}
-              </div>
-              <div className="flex gap-2">
+                  <div className="flex flex-wrap items-center gap-4 text-[11px] text-white/70 pt-5">
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={draft.active !== false}
+                        onChange={(e) => setDraft((prev) => ({ ...prev, active: e.target.checked }))}
+                      />
+                      Active on pricing
+                    </label>
+                    <label className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={Boolean(draft.contactSales)}
+                        onChange={(e) =>
+                          setDraft((prev) => ({ ...prev, contactSales: e.target.checked }))
+                        }
+                      />
+                      Talk to sales (no checkout)
+                    </label>
+                  </div>
+                </div>
+              </section>
+
+              <section className="space-y-2">
+                <h5 className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
+                  Pricing card features (one per line)
+                </h5>
+                <textarea
+                  rows={5}
+                  value={(draft.features || []).join('\n')}
+                  onChange={(e) =>
+                    setDraft((prev) => ({
+                      ...prev,
+                      features: e.target.value
+                        .split('\n')
+                        .map((s) => s.trim())
+                        .filter(Boolean),
+                    }))
+                  }
+                  placeholder={'30 AI posts / month\n2 social accounts\n300 AI credits / month'}
+                  className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white resize-y font-mono"
+                />
+              </section>
+
+              {LIMIT_GROUPS.map((group) => (
+                <section key={group.title} className="space-y-2">
+                  <h5 className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
+                    {group.title}
+                  </h5>
+                  <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
+                    {group.fields.map(([key, label]) => (
+                      <label key={key} className="text-[11px] text-white/60 space-y-1">
+                        <span>{label}</span>
+                        <input
+                          type="number"
+                          value={Number(draft.limits?.[key] ?? 0)}
+                          onChange={(e) =>
+                            setDraft((prev) => ({
+                              ...prev,
+                              limits: {
+                                ...blankLimits(),
+                                ...prev?.limits,
+                                [key]: Number(e.target.value),
+                              },
+                            }))
+                          }
+                          className="w-full rounded-lg bg-black/40 border border-white/20 px-2 py-1.5 text-sm text-white"
+                        />
+                      </label>
+                    ))}
+                  </div>
+                </section>
+              ))}
+
+              <section className="space-y-2">
+                <h5 className="text-[10px] font-semibold uppercase tracking-wider text-white/50">
+                  Feature flags
+                </h5>
+                <div className="flex flex-wrap gap-4 text-[11px] text-white/70">
+                  {(
+                    [
+                      ['cronEnabled', 'Scheduled jobs'],
+                      ['imagesEnabled', 'AI images'],
+                      ['videosEnabled', 'AI videos'],
+                    ] as const
+                  ).map(([key, label]) => (
+                    <label key={key} className="inline-flex items-center gap-2">
+                      <input
+                        type="checkbox"
+                        checked={draft.limits?.[key] !== false}
+                        onChange={(e) =>
+                          setDraft((prev) => ({
+                            ...prev,
+                            limits: {
+                              ...blankLimits(),
+                              ...prev?.limits,
+                              [key]: e.target.checked,
+                            },
+                          }))
+                        }
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </section>
+
+              <div className="flex flex-wrap gap-2 pt-1">
                 <button
                   type="button"
                   disabled={saving}
-                  onClick={() => saveTier({ ...draft, currency: 'NGN' })}
-                  className="rounded-xl bg-white text-black px-3 py-2 text-xs font-semibold"
+                  onClick={() =>
+                    saveTier({
+                      ...draft,
+                      currency: 'NGN',
+                      features: draft.features || [],
+                      limits: { ...blankLimits(), ...draft.limits },
+                    })
+                  }
+                  className="inline-flex items-center gap-1 rounded-xl bg-white text-black px-4 py-2 text-xs font-semibold"
                 >
-                  Save tier
+                  <Save className="w-3.5 h-3.5" /> {saving ? 'Saving…' : 'Save tier'}
                 </button>
                 <button
                   type="button"
                   onClick={() => setDraft(null)}
-                  className="rounded-xl bg-white/10 border border-white/20 px-3 py-2 text-xs text-white"
+                  className="rounded-xl bg-white/10 border border-white/20 px-4 py-2 text-xs text-white"
                 >
                   Cancel
                 </button>
@@ -728,7 +1059,8 @@ export const AdminView: React.FC = () => {
                   <div className="text-lg font-semibold text-white">{selectedUser.name}</div>
                   <div className="text-xs text-white/60">{selectedUser.email}</div>
                   <div className="text-xs text-white/70 mt-1 capitalize">
-                    Plan {selectedUser.subscriptionTierSlug} · {selectedUser.subscriptionStatus}
+                    Plan {selectedUser.subscriptionTierSlug || 'none'} · {selectedUser.subscriptionStatus}
+                    {selectedUser.subscriptionBypass ? ' · BYPASS' : ''}
                   </div>
                 </div>
 
@@ -744,6 +1076,14 @@ export const AdminView: React.FC = () => {
                       Force {t.name}
                     </button>
                   ))}
+                  <button
+                    type="button"
+                    disabled={saving}
+                    onClick={() => setBypass(selectedUser.id, !selectedUser.subscriptionBypass)}
+                    className="rounded-lg bg-sky-500/20 border border-sky-400/40 px-2 py-1 text-[11px] text-sky-100"
+                  >
+                    {selectedUser.subscriptionBypass ? 'Remove bypass' : 'Bypass subscription'}
+                  </button>
                   <button
                     type="button"
                     disabled={saving}

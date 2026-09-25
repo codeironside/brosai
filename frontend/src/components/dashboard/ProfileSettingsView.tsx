@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { useApp } from '../../context/AppContext';
 import { GlassSelect } from '../common/GlassSelect';
-import { User, Check, Save, Mail, Camera } from 'lucide-react';
+import { User, Check, Save, Mail, Camera, Gift } from 'lucide-react';
 import { AccountCategory, UserProfile } from '../../types';
 import { uploadUserMedia } from '../../config/firebase';
 
@@ -29,6 +29,9 @@ export const ProfileSettingsView: React.FC = () => {
   const [uploading, setUploading] = useState(false);
   const [saved, setSaved] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  const [referralShareUrl, setReferralShareUrl] = useState('');
+  const [referralCode, setReferralCode] = useState('');
+  const [copied, setCopied] = useState(false);
 
   useEffect(() => {
     const load = async () => {
@@ -48,6 +51,32 @@ export const ProfileSettingsView: React.FC = () => {
     };
     load();
   }, [authenticatedFetch]);
+
+  useEffect(() => {
+    const loadReferral = async () => {
+      try {
+        const res = await authenticatedFetch('/api/billing/me');
+        const json = await res.json();
+        if (!res.ok || !json.success) return;
+        setReferralShareUrl(String(json.data?.referralShareUrl || ''));
+        setReferralCode(String(json.data?.referralCode || ''));
+      } catch (err) {
+        console.warn('Failed to load referral:', err);
+      }
+    };
+    loadReferral();
+  }, [authenticatedFetch]);
+
+  const copyReferral = async () => {
+    if (!referralShareUrl) return;
+    try {
+      await navigator.clipboard.writeText(referralShareUrl);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch {
+      /* ignore */
+    }
+  };
 
   const persistLocalUser = (profile: Partial<UserProfile>) => {
     setUser((prev) => {
@@ -258,6 +287,31 @@ export const ProfileSettingsView: React.FC = () => {
           </button>
         </div>
       </form>
+
+      <div className="p-4 sm:p-6 rounded-2xl bg-white/10 backdrop-blur-xl border border-white/20 shadow-2xl space-y-3">
+        <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-white/70">
+          <Gift className="w-4 h-4" /> Your referral link
+        </div>
+        <p className="text-sm text-white/70">
+          Share this link. When someone you referred pays for a subscription, you earn a commission.
+        </p>
+        {referralCode ? (
+          <p className="text-xs text-white/50">Code: {referralCode}</p>
+        ) : null}
+        <div className="flex flex-col sm:flex-row gap-2">
+          <code className="flex-1 text-xs bg-black/40 border border-white/15 rounded-xl px-3 py-2 text-white/90 break-all">
+            {referralShareUrl || '—'}
+          </code>
+          <button
+            type="button"
+            onClick={copyReferral}
+            disabled={!referralShareUrl}
+            className="px-4 py-2 rounded-xl bg-white text-black text-xs font-semibold disabled:opacity-50"
+          >
+            {copied ? 'Copied' : 'Copy link'}
+          </button>
+        </div>
+      </div>
     </div>
   );
 };
