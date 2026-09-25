@@ -186,12 +186,12 @@ export const BillingView: React.FC = () => {
 
   const credits = me?.credits;
   const caps = me?.caps;
+  /** Only after an active plan's credits are fully used (not for inactive / zero-allowance users). */
   const creditsExhausted =
+    Boolean(me?.hasAccess) &&
     Boolean(credits) &&
-    (Number(credits!.remaining) <= 0 ||
-      (Number(credits!.monthlyAllowance) > 0 &&
-        Number(credits!.monthlyUsed) >= Number(credits!.monthlyAllowance) &&
-        Number(credits!.purchasedBalance) <= 0));
+    Number(credits!.monthlyAllowance) > 0 &&
+    Number(credits!.remaining) <= 0;
 
   return (
     <div className="space-y-6">
