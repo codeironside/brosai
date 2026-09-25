@@ -37,8 +37,9 @@ export class LoginService {
         category: 'business',
         organizationName: 'Vamvamvam Brand Account',
         autopilotMode: 'assisted',
-        subscriptionTierSlug: 'free',
-        subscriptionStatus: 'free',
+        subscriptionTierSlug: '',
+        subscriptionStatus: 'inactive',
+        subscriptionBypass: false,
         createdAt: new Date(),
       };
       if (!existing && referredBy) {
@@ -80,6 +81,13 @@ export class LoginService {
       });
 
       dbUser.refreshToken = tokens.refreshToken;
+      // Migrate legacy free plan users before save
+      if (dbUser.subscriptionStatus === 'free') {
+        dbUser.subscriptionStatus = 'inactive';
+      }
+      if (dbUser.subscriptionTierSlug === 'free' || dbUser.subscriptionTierSlug === 'basic') {
+        dbUser.subscriptionTierSlug = '';
+      }
       await dbUser.save();
 
       logger.info(`[Auth Service] Saved user to MongoDB. ID: ${dbUser._id}, Role: ${dbUser.role}. Tokens generated.`);
@@ -96,8 +104,9 @@ export class LoginService {
           autopilotMode: dbUser.autopilotMode || 'assisted',
           authProvider: 'google',
           referralCode: dbUser.referralCode || null,
-          subscriptionTierSlug: dbUser.subscriptionTierSlug || 'free',
-          subscriptionStatus: dbUser.subscriptionStatus || 'free',
+          subscriptionTierSlug: dbUser.subscriptionTierSlug || '',
+          subscriptionStatus: dbUser.subscriptionStatus || 'inactive',
+          subscriptionBypass: Boolean(dbUser.subscriptionBypass),
         },
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken

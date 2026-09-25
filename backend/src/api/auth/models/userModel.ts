@@ -197,23 +197,50 @@ const UserSchema = new mongoose.Schema({
   referralCode: { type: String, unique: true, sparse: true },
   referredBy: { type: String, default: null },
 
-  subscriptionTierSlug: { type: String, default: 'free' },
+  /** Empty until first paid plan; Starter is the lowest public plan (no Free). */
+  subscriptionTierSlug: { type: String, default: '' },
   subscriptionStatus: {
     type: String,
-    enum: ['free', 'active', 'past_due', 'cancelled'],
-    default: 'free',
+    enum: ['inactive', 'active', 'past_due', 'cancelled', 'bypassed'],
+    default: 'inactive',
   },
+  /** Super Admin: use product without an active paid subscription */
+  subscriptionBypass: { type: Boolean, default: false },
   paymentCustomerId: { type: String, default: '' },
   lastPaymentProvider: { type: String, default: '' },
   lastCheckoutTxRef: { type: String, default: '' },
   currentPeriodEnd: Date,
 
+  /** Purchased top-up credits (do not reset monthly) */
+  aiCreditsPurchased: { type: Number, default: 0 },
+  /** Last credit pack checkout slug (for webhook attribution) */
+  lastCreditPackSlug: { type: String, default: '' },
+
   usageCounters: {
     aiMessagesDay: String,
     aiMessagesCount: { type: Number, default: 0 },
+    /** YYYY-MM billing usage window */
+    periodKey: { type: String, default: '' },
+    aiCreditsUsed: { type: Number, default: 0 },
+    aiPostsUsed: { type: Number, default: 0 },
+    aiVideosUsed: { type: Number, default: 0 },
+    aiRepliesUsed: { type: Number, default: 0 },
   },
 
   createdAt: { type: Date, default: Date.now }
+});
+
+/** Legacy `free` → `inactive` (Starter is now the lowest plan). */
+UserSchema.pre('validate', function (next) {
+  const status = String(this.subscriptionStatus || '');
+  if (status === 'free') {
+    this.subscriptionStatus = 'inactive';
+  }
+  const slug = String(this.subscriptionTierSlug || '');
+  if (slug === 'free' || slug === 'basic') {
+    this.subscriptionTierSlug = '';
+  }
+  next();
 });
 
 export const UserModel = mongoose.models.User || mongoose.model('User', UserSchema);

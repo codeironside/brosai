@@ -4,11 +4,22 @@ const TierLimitsSchema = new mongoose.Schema(
   {
     maxBrands: { type: Number, default: 1 },
     maxAgents: { type: Number, default: 1 },
-    maxSocialAccounts: { type: Number, default: 3 },
-    maxJobsPerDay: { type: Number, default: 3 },
+    maxSocialAccounts: { type: Number, default: 2 },
+    maxJobsPerDay: { type: Number, default: 5 },
+    /** @deprecated Prefer monthly AI caps + credits. Kept for legacy call sites. */
     maxAiMessagesPerDay: { type: Number, default: 50 },
     cronEnabled: { type: Boolean, default: true },
     imagesEnabled: { type: Boolean, default: true },
+    videosEnabled: { type: Boolean, default: true },
+    /** Monthly marketing / hard caps */
+    maxAiPostsPerMonth: { type: Number, default: 30 },
+    maxAiVideosPerMonth: { type: Number, default: 2 },
+    maxAiRepliesPerMonth: { type: Number, default: 50 },
+    schedulingDays: { type: Number, default: 30 },
+    /** Monthly AI credit allowance (resets each billing month) */
+    monthlyCredits: { type: Number, default: 300 },
+    /** Team seats (Business+) */
+    maxTeamMembers: { type: Number, default: 1 },
   },
   { _id: false },
 );
@@ -24,6 +35,12 @@ const SubscriptionTierSchema = new mongoose.Schema({
   providerPlanId: { type: String, default: '' },
   active: { type: Boolean, default: true },
   sortOrder: { type: Number, default: 0 },
+  /** e.g. "MOST POPULAR" */
+  badge: { type: String, default: '' },
+  /** Show "Talk to sales" instead of Checkout */
+  contactSales: { type: Boolean, default: false },
+  /** Marketing feature bullets for pricing cards */
+  features: { type: [String], default: [] },
   limits: { type: TierLimitsSchema, default: () => ({}) },
   createdAt: { type: Date, default: Date.now },
   updatedAt: { type: Date, default: Date.now },
@@ -40,4 +57,11 @@ export type TierLimits = {
   maxAiMessagesPerDay: number;
   cronEnabled: boolean;
   imagesEnabled: boolean;
+  videosEnabled: boolean;
+  maxAiPostsPerMonth: number;
+  maxAiVideosPerMonth: number;
+  maxAiRepliesPerMonth: number;
+  schedulingDays: number;
+  monthlyCredits: number;
+  maxTeamMembers: number;
 };

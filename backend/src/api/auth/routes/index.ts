@@ -201,8 +201,9 @@ router.get('/me', authenticateToken, async (req: Request, res: Response): Promis
           notificationSettings: dbUser.notificationSettings,
           referralCode: dbUser.referralCode || null,
           referredBy: dbUser.referredBy || null,
-          subscriptionTierSlug: dbUser.subscriptionTierSlug || 'free',
-          subscriptionStatus: dbUser.subscriptionStatus || 'free',
+          subscriptionTierSlug: dbUser.subscriptionTierSlug || '',
+          subscriptionStatus: dbUser.subscriptionStatus || 'inactive',
+          subscriptionBypass: Boolean(dbUser.subscriptionBypass),
           currentPeriodEnd: dbUser.currentPeriodEnd || null,
         }
       }
@@ -1186,7 +1187,9 @@ router.post('/ask-ai', authenticateToken, async (req: Request, res: Response): P
       return;
     }
     const { assertWithinLimit, bumpAiMessageUsage } = await import('../../billing/services/limitsService.js');
+    const { assertAndConsumeCredits } = await import('../../billing/services/usageCreditsService.js');
     await assertWithinLimit(userId, 'aiMessages');
+    await assertAndConsumeCredits(userId, 'caption');
     await bumpAiMessageUsage(userId);
     const channel = conversationChannel(String(req.body?.channel || ''));
     const requestedThreadId = String(req.body?.threadId || '').trim();
