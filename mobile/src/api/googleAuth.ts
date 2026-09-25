@@ -70,10 +70,20 @@ export async function signInWithGoogle() {
     `${Date.now()}-${Math.random()}`,
   );
 
+  let referralCode = '';
+  try {
+    const initial = await Linking.getInitialURL();
+    const fromInitial = initial ? new URL(initial).searchParams.get('ref') : null;
+    referralCode = fromInitial || '';
+  } catch {
+    /* ignore */
+  }
+
   const startUrl =
     `${API_URL}/api/auth/google/mobile/start` +
     `?app_redirect=${encodeURIComponent(deepLinkBase)}` +
-    `&client_session=${encodeURIComponent(clientSession)}`;
+    `&client_session=${encodeURIComponent(clientSession)}` +
+    (referralCode ? `&ref=${encodeURIComponent(referralCode)}` : '');
 
   const stop = { stopped: false };
   let settled = false;

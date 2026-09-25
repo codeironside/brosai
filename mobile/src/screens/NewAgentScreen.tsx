@@ -13,7 +13,7 @@ import {
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { ACCENT, AGENTS_VIDEO, MUTED, POSTING_FREQUENCIES } from '../theme';
 import { useSession } from '../session';
-import { fetchBrandBrains, saveManager } from '../api/endpoints';
+import { fetchBrandBrains, fetchSocialAccounts, saveManager } from '../api/endpoints';
 import { ScreenVideo } from '../components/ScreenVideo';
 import { ProfileHeader } from '../components/ProfileHeader';
 
@@ -21,6 +21,13 @@ type Props = {
   onOpenChat?: () => void;
   onOpenProfile?: () => void;
   onCreated?: () => void;
+};
+
+const PLATFORM_LABEL: Record<string, string> = {
+  linkedin: 'LinkedIn',
+  twitter: 'X',
+  facebook: 'Facebook',
+  threads: 'Threads',
 };
 
 export function NewAgentScreen({ onOpenChat, onOpenProfile, onCreated }: Props) {
@@ -32,24 +39,37 @@ export function NewAgentScreen({ onOpenChat, onOpenProfile, onCreated }: Props) 
   const [frequency, setFrequency] = useState<string>(POSTING_FREQUENCIES[2]);
   const [brands, setBrands] = useState<any[]>([]);
   const [brandId, setBrandId] = useState('');
+  const [destinations, setDestinations] = useState<
+    Array<{ id: string; platform: string; handle: string }>
+  >([]);
+  const [postTo, setPostTo] = useState<string[]>([]);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [warnings, setWarnings] = useState<string[]>([]);
 
-  const loadBrands = useCallback(async () => {
+  const load = useCallback(async () => {
     try {
-      const data = await fetchBrandBrains();
-      const items = Array.isArray(data.items) ? data.items : [];
+      const [brandData, socials] = await Promise.all([fetchBrandBrains(), fetchSocialAccounts()]);
+      const items = Array.isArray(brandData.items) ? brandData.items : [];
       setBrands(items);
-      setBrandId(data.activeId || items[0]?.id || '');
+      setBrandId(brandData.activeId || items[0]?.id || '');
+      setDestinations(
+        (socials || [])
+          .filter((item) => item.connected && item.platform)
+          .map((item) => ({
+            id: String(item.id || `${item.platform}:${item.accountId || item.handle || ''}`),
+            platform: String(item.platform),
+            handle: String(item.handle || item.accountId || item.platform),
+          })),
+      );
     } catch {
       /* optional */
     }
   }, []);
 
   useEffect(() => {
-    if (signedIn) loadBrands();
-  }, [loadBrands, signedIn]);
+    if (signedIn) load();
+  }, [load, signedIn]);
 
   const save = async () => {
     if (!name.trim()) {
@@ -67,7 +87,7 @@ export function NewAgentScreen({ onOpenChat, onOpenProfile, onCreated }: Props) 
         postingFrequency: frequency,
         workingHours: '24/7 Autopilot',
         brandId,
-        postTo: [],
+        postTo,
       });
       if (Array.isArray(data?.warnings) && data.warnings.length) {
         setWarnings(data.warnings);
@@ -89,7 +109,7 @@ export function NewAgentScreen({ onOpenChat, onOpenProfile, onCreated }: Props) 
       >
         <ProfileHeader onOpenChat={onOpenChat} onOpenProfile={onOpenProfile} />
         <Text style={styles.title}>New agent</Text>
-        <Text style={styles.sub}>Name the worker and choose how often it should post.</Text>
+        <Text style={styles.sub}>Name the worker, pick destinations, and choose how often it should post.</Text>
 
         {!signedIn ? (
           <View style={styles.guest}>
@@ -157,6 +177,35 @@ export function NewAgentScreen({ onOpenChat, onOpenProfile, onCreated }: Props) 
               </>
             ) : null}
 
+            <Text style={styles.label}>Post to accounts</Text>
+            {destinations.length === 0 ? (
+              <Text style={styles.hint}>Connect social accounts in Profile → Connections first.</Text>
+            ) : (
+              <View style={styles.destGrid}>
+                {destinations.map((item) => {
+                  const on = postTo.includes(item.id);
+                  return (
+                    <Pressable
+                      key={item.id}
+                      onPress={() =>
+                        setPostTo((prev) =>
+                          prev.includes(item.id) ? prev.filter((id) => id !== item.id) : [...prev, item.id],
+                        )
+                      }
+                      style={[styles.destChip, on && styles.chipOn]}
+                    >
+                      <Text style={[styles.chipText, on && styles.chipTextOn]}>
+                        {PLATFORM_LABEL[item.platform] || item.platform}
+                      </Text>
+                      <Text style={[styles.destHandle, on && styles.chipTextOn]} numberOfLines={1}>
+                        {item.handle}
+                      </Text>
+                    </Pressable>
+                  );
+                })}
+              </View>
+            )}
+
             {warnings.map((w) => (
               <Text key={w} style={styles.warn}>
                 {w}
@@ -180,6 +229,7 @@ const styles = StyleSheet.create({
   title: { color: '#fff', fontSize: 32, fontWeight: '700' },
   sub: { color: MUTED, marginTop: 8, marginBottom: 16, fontSize: 15, lineHeight: 21 },
   label: { color: ACCENT, fontSize: 12, fontWeight: '700', marginBottom: 6, marginTop: 8 },
+  hint: { color: MUTED, fontSize: 12, marginBottom: 8 },
   input: {
     backgroundColor: 'rgba(28,28,30,0.92)',
     borderRadius: 14,
@@ -190,15 +240,25 @@ const styles = StyleSheet.create({
   },
   area: { minHeight: 80, textAlignVertical: 'top' },
   chips: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
+  destGrid: { flexDirection: 'row', flexWrap: 'wrap', gap: 8, marginBottom: 4 },
   chip: {
     backgroundColor: 'rgba(28,28,30,0.92)',
     borderRadius: 999,
     paddingHorizontal: 12,
     paddingVertical: 9,
   },
+  destChip: {
+    backgroundColor: 'rgba(28,28,30,0.92)',
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    maxWidth: '48%',
+    minWidth: '46%',
+  },
   chipOn: { backgroundColor: ACCENT },
   chipText: { color: MUTED, fontSize: 12, fontWeight: '600' },
   chipTextOn: { color: '#082f49' },
+  destHandle: { color: MUTED, fontSize: 11, marginTop: 2 },
   warn: { color: '#fbbf24', marginTop: 8, fontSize: 12 },
   error: { color: '#f87171', marginTop: 10 },
   guest: { flex: 1, justifyContent: 'center', gap: 8 },

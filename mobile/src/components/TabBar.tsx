@@ -29,7 +29,7 @@ type Props = {
 
 function resolveHighlight(active: TabId): TabId {
   if (active === 'chat' || active === 'jobStart' || active === 'search') return 'home';
-  if (active === 'profile') return 'home';
+  if (active === 'profile' || active === 'connections' || active === 'billing') return 'home';
   if (active === 'brandCreate') return 'brand';
   if (active === 'agentCreate') return 'agents';
   return active;

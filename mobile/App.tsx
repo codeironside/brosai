@@ -19,6 +19,8 @@ import { NewBrandScreen } from './src/screens/NewBrandScreen';
 import { ProfileScreen } from './src/screens/ProfileScreen';
 import { CronScreen } from './src/screens/CronScreen';
 import { SearchScreen } from './src/screens/SearchScreen';
+import { ConnectionsScreen } from './src/screens/ConnectionsScreen';
+import { BillingScreen } from './src/screens/BillingScreen';
 
 export default function App() {
   return (
@@ -143,7 +145,18 @@ function Root() {
           />
         )}
         {tab === 'profile' && (
-          <ProfileScreen onBack={() => setTab('home')} onOpenChat={openChat} />
+          <ProfileScreen
+            onBack={() => setTab('home')}
+            onOpenChat={openChat}
+            onOpenConnections={() => setTab('connections')}
+            onOpenBilling={() => setTab('billing')}
+          />
+        )}
+        {tab === 'connections' && (
+          <ConnectionsScreen onBack={() => setTab('profile')} />
+        )}
+        {tab === 'billing' && (
+          <BillingScreen onBack={() => setTab('profile')} />
         )}
         {tab === 'chat' && (
           <ChatScreen
@@ -157,15 +170,17 @@ function Root() {
           />
         )}
       </View>
-      <TabBar
-        active={tab}
-        onChange={(id) => {
-          if (id !== 'chat') setRecording(false);
-          setTab(id);
-        }}
-        recording={recording}
-        onStopRecording={() => setRecording(false)}
-      />
+      {tab !== 'chat' ? (
+        <TabBar
+          active={tab}
+          onChange={(id) => {
+            if (id !== 'chat') setRecording(false);
+            setTab(id);
+          }}
+          recording={recording}
+          onStopRecording={() => setRecording(false)}
+        />
+      ) : null}
       {showSplash && (
         <SplashScreenView player={player} fontsLoaded={fontsLoaded} opacity={splashOpacity} />
       )}
