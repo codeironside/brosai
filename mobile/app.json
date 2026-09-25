@@ -13,7 +13,11 @@
       "bundleIdentifier": "com.vamvamvam.ai",
       "icon": "./assets/icon.png",
       "infoPlist": {
-        "UIBackgroundModes": ["remote-notification"]
+        "UIBackgroundModes": [
+          "remote-notification",
+          "remote-notification"
+        ],
+        "ITSAppUsesNonExemptEncryption": false
       }
     },
     "android": {
@@ -50,7 +54,7 @@
     ],
     "extra": {
       "eas": {
-        "projectId": ""
+        "projectId": "ae354068-01c4-4afe-ac24-c5f54ad6a178"
       }
     }
   }

@@ -251,3 +251,91 @@ export async function saveBrandBrain(input: {
   });
   return json.data;
 }
+
+export type SocialAccount = {
+  id?: string;
+  platform: string;
+  name?: string;
+  connected: boolean;
+  handle?: string;
+  accountId?: string;
+  avatarUrl?: string;
+};
+
+export async function fetchSocialAccounts() {
+  const json = await apiFetch<{ success: boolean; data: SocialAccount[] }>('/api/auth/social-accounts');
+  return Array.isArray(json.data) ? json.data : [];
+}
+
+export async function fetchSocialOAuthUrl(platform: string) {
+  const json = await apiFetch<{
+    success: boolean;
+    oauthUrl: string;
+    platform: string;
+  }>(`/api/auth/social-accounts/oauth-url?platform=${encodeURIComponent(platform)}`);
+  if (!json.oauthUrl) throw new Error('No OAuth URL returned');
+  return { oauthUrl: json.oauthUrl, platform: json.platform };
+}
+
+export async function disconnectSocialAccount(accountId: string) {
+  const json = await apiFetch<{ success: boolean; data: SocialAccount[] }>(
+    `/api/auth/social-accounts/${encodeURIComponent(accountId)}`,
+    { method: 'DELETE' },
+  );
+  return Array.isArray(json.data) ? json.data : [];
+}
+
+export type BillingTier = {
+  slug: string;
+  name: string;
+  description?: string;
+  price: number;
+  currency: string;
+  interval: string;
+  limits?: Record<string, number | boolean>;
+};
+
+export async function fetchBillingTiers() {
+  const json = await apiFetch<{ success: boolean; data: { tiers: BillingTier[] } }>(
+    '/api/billing/tiers',
+    undefined,
+    { auth: false },
+  );
+  return Array.isArray(json.data?.tiers) ? json.data.tiers : [];
+}
+
+export async function fetchBillingMe() {
+  const json = await apiFetch<{ success: boolean; data: any }>('/api/billing/me');
+  return json.data;
+}
+
+export async function fetchCreditPacks() {
+  const json = await apiFetch<{ success: boolean; data: { packs: any[] } }>(
+    '/api/billing/credit-packs',
+    undefined,
+    { auth: false },
+  );
+  return Array.isArray(json.data?.packs) ? json.data.packs : [];
+}
+
+export async function startBillingCheckout(tierSlug: string) {
+  const json = await apiFetch<{ success: boolean; data: { link?: string; tierSlug?: string } }>(
+    '/api/billing/checkout',
+    {
+      method: 'POST',
+      body: JSON.stringify({ tierSlug }),
+    },
+  );
+  return json.data || {};
+}
+
+export async function startCreditPackCheckout(packSlug: string) {
+  const json = await apiFetch<{ success: boolean; data: { link?: string; packSlug?: string } }>(
+    '/api/billing/checkout/credits',
+    {
+      method: 'POST',
+      body: JSON.stringify({ packSlug }),
+    },
+  );
+  return json.data || {};
+}

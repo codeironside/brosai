@@ -316,8 +316,16 @@ export function ChatScreen({ onBack, onOpenProfile, listening = false, onListeni
         {error ? <Text style={styles.error}>{error}</Text> : null}
 
         {!showHistory ? (
-          <View style={styles.composer}>
-            {!listening ? (
+          <View style={[styles.composer, { marginBottom: Math.max(insets.bottom, 8) }]}>
+            {listening ? (
+              <Pressable
+                onPress={() => setListening(false)}
+                style={styles.micStop}
+                hitSlop={6}
+              >
+                <Ionicons name="stop" size={18} color="#082f49" />
+              </Pressable>
+            ) : (
               <Pressable
                 onPress={() => {
                   setSeconds(0);
@@ -328,12 +336,12 @@ export function ChatScreen({ onBack, onOpenProfile, listening = false, onListeni
               >
                 <Ionicons name="mic-outline" size={22} color="#fff" />
               </Pressable>
-            ) : null}
+            )}
             <TextInput
               ref={inputRef}
               value={draft}
               onChangeText={setDraft}
-              placeholder={listening ? 'Listening… tap mic in the footer to stop' : 'Message Hire AI'}
+              placeholder={listening ? 'Listening… tap stop to finish' : 'Message Hire AI'}
               placeholderTextColor="#71717a"
               style={styles.input}
               editable={!sending && !listening}
@@ -431,6 +439,14 @@ const styles = StyleSheet.create({
     height: 44,
     borderRadius: 22,
     backgroundColor: '#3a3a3c',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  micStop: {
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: ACCENT,
     alignItems: 'center',
     justifyContent: 'center',
   },

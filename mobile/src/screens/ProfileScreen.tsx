@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   KeyboardAvoidingView,
@@ -6,6 +6,7 @@ import {
   Platform,
   Pressable,
   ScrollView,
+  Share,
   StyleSheet,
   Switch,
   Text,
@@ -18,7 +19,7 @@ import * as SecureStore from 'expo-secure-store';
 import { ACCENT, BRAND_VIDEO, MUTED, SUPPORT_EMAIL, SUPPORT_URL } from '../theme';
 import { useSession } from '../session';
 import { getAccessToken, saveSession, type ApiUser } from '../api/client';
-import { updateProfile } from '../api/endpoints';
+import { fetchBillingMe, updateProfile } from '../api/endpoints';
 import {
   ensurePushPermissions,
   getCachedPushToken,
@@ -32,9 +33,11 @@ const CATEGORIES = ['personal', 'creator', 'business', 'church', 'organization',
 type Props = {
   onBack?: () => void;
   onOpenChat?: () => void;
+  onOpenConnections?: () => void;
+  onOpenBilling?: () => void;
 };
 
-export function ProfileScreen({ onBack, onOpenChat }: Props) {
+export function ProfileScreen({ onBack, onOpenChat, onOpenConnections, onOpenBilling }: Props) {
   const insets = useSafeAreaInsets();
   const { signedIn, signIn, signOut, busy, user, error, refreshProfile } = useSession();
   const [pushOn, setPushOn] = useState(false);
@@ -51,10 +54,36 @@ export function ProfileScreen({ onBack, onOpenChat }: Props) {
   const [saving, setSaving] = useState(false);
   const [saveNote, setSaveNote] = useState<string | null>(null);
   const [saveError, setSaveError] = useState<string | null>(null);
+  const [referralShareUrl, setReferralShareUrl] = useState('');
+  const [referralCode, setReferralCode] = useState('');
+  const [referralLoading, setReferralLoading] = useState(false);
+
+  const loadReferral = useCallback(async () => {
+    if (!signedIn) {
+      setReferralShareUrl('');
+      setReferralCode('');
+      return;
+    }
+    setReferralLoading(true);
+    try {
+      const billing = await fetchBillingMe();
+      setReferralShareUrl(String(billing?.referralShareUrl || ''));
+      setReferralCode(String(billing?.referralCode || ''));
+    } catch {
+      setReferralShareUrl('');
+      setReferralCode('');
+    } finally {
+      setReferralLoading(false);
+    }
+  }, [signedIn]);
 
   useEffect(() => {
     setPushOn(Boolean(getCachedPushToken()));
   }, [signedIn]);
+
+  useEffect(() => {
+    loadReferral().catch(() => {});
+  }, [loadReferral]);
 
   useEffect(() => {
     setName(user?.name || '');
@@ -62,6 +91,18 @@ export function ProfileScreen({ onBack, onOpenChat }: Props) {
     setCategory(user?.category || 'personal');
     setAvatarUrl(user?.avatarUrl || '');
   }, [user]);
+
+  const shareReferral = async () => {
+    if (!referralShareUrl) return;
+    try {
+      await Share.share({
+        message: `Join me on Vamvamvam AI: ${referralShareUrl}`,
+        url: referralShareUrl,
+      });
+    } catch {
+      Linking.openURL(referralShareUrl).catch(() => {});
+    }
+  };
 
   const togglePush = async (value: boolean) => {
     if (!signedIn || isExpoGo()) {
@@ -232,6 +273,51 @@ export function ProfileScreen({ onBack, onOpenChat }: Props) {
                   />
                 </View>
                 {pushNote ? <Text style={styles.note}>{pushNote}</Text> : null}
+
+                <View style={styles.referralBlock}>
+                  <Text style={styles.label}>Referral link</Text>
+                  {referralLoading ? (
+                    <ActivityIndicator color={ACCENT} style={{ marginVertical: 8 }} />
+                  ) : (
+                    <>
+                      <Text style={styles.referralUrl} selectable>
+                        {referralShareUrl || '—'}
+                      </Text>
+                      {referralCode ? (
+                        <Text style={styles.emailHint}>Code: {referralCode}</Text>
+                      ) : null}
+                      <Pressable
+                        onPress={shareReferral}
+                        style={[styles.cta, !referralShareUrl && styles.ctaBusy]}
+                        disabled={!referralShareUrl}
+                      >
+                        <Text style={styles.ctaText}>Share referral link</Text>
+                      </Pressable>
+                    </>
+                  )}
+                </View>
+
+                <Pressable onPress={onOpenConnections} style={styles.supportRow}>
+                  <View style={styles.supportIcon}>
+                    <Ionicons name="share-social-outline" size={18} color={ACCENT} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pushTitle}>Connections</Text>
+                    <Text style={styles.pushBody}>Link LinkedIn, X, Facebook, Threads</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={MUTED} />
+                </Pressable>
+
+                <Pressable onPress={onOpenBilling} style={styles.supportRow}>
+                  <View style={styles.supportIcon}>
+                    <Ionicons name="card-outline" size={18} color={ACCENT} />
+                  </View>
+                  <View style={{ flex: 1 }}>
+                    <Text style={styles.pushTitle}>Billing & referrals</Text>
+                    <Text style={styles.pushBody}>Plans, upgrades, share your referral link</Text>
+                  </View>
+                  <Ionicons name="chevron-forward" size={16} color={MUTED} />
+                </Pressable>
               </>
             )}
 
@@ -351,6 +437,18 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   note: { marginTop: 10, color: MUTED, fontSize: 12 },
+  referralBlock: {
+    marginTop: 18,
+    paddingTop: 14,
+    borderTopWidth: StyleSheet.hairlineWidth,
+    borderTopColor: '#2a2a2e',
+  },
+  referralUrl: {
+    color: '#e4e4e7',
+    fontSize: 13,
+    lineHeight: 18,
+    marginBottom: 4,
+  },
   ok: { marginTop: 10, color: '#86efac', fontSize: 13 },
   error: { marginTop: 10, color: '#f87171', fontSize: 13 },
   cta: {

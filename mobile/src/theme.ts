@@ -40,7 +40,9 @@ export type TabId =
   | 'chat'
   | 'profile'
   | 'jobStart'
-  | 'search';
+  | 'search'
+  | 'connections'
+  | 'billing';
 
 export const AGENTS_VIDEO = SEARCH_VIDEO;
 
